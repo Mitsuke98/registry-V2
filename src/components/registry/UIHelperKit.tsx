@@ -76,17 +76,21 @@ export const ScanGrade: React.FC<{ score: number }> = ({ score }) => {
 };
 
 // StatusBadge helper
-export const StatusBadge: React.FC<{ status: 'approved' | 'pending' | 'rejected' }> = ({ status }) => {
+export const StatusBadge: React.FC<{ status: 'approved' | 'pending' | 'rejected' | 'in_review' | string }> = ({ status }) => {
   let styleClass = "badge-status-approved";
+  let labelText = status;
   if (status === 'pending') {
     styleClass = "badge-status-pending";
   } else if (status === 'rejected') {
     styleClass = "badge-status-rejected";
+  } else if (status === 'in_review') {
+    styleClass = "badge-status-in_review";
+    labelText = "in review";
   }
 
   return (
     <span className={`inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border uppercase tracking-wider ${styleClass}`}>
-      {status}
+      {labelText}
     </span>
   );
 };

@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface StatusBadgeProps {
-  status: 'approved' | 'pending' | 'rejected';
+  status: 'approved' | 'pending' | 'rejected' | 'in_review';
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
@@ -9,12 +9,14 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
     approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     pending: 'bg-amber-50 text-amber-700 border-amber-200',
     rejected: 'bg-red-50 text-red-700 border-red-200',
+    in_review: 'bg-sky-50 text-sky-700 border-sky-200',
   };
 
   const labels = {
     approved: 'Approved',
     pending: 'Pending',
     rejected: 'Rejected',
+    in_review: 'In Review',
   };
 
   return (

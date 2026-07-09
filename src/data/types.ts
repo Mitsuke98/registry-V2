@@ -1,4 +1,4 @@
-export type Status = 'approved' | 'pending' | 'rejected';
+export type Status = 'approved' | 'pending' | 'rejected' | 'in_review';
 export type HealthStatus = 'healthy' | 'degraded' | 'down';
 export type EntityKind = 'skill' | 'server' | 'agent' | 'prompt';
 
@@ -7,6 +7,29 @@ export interface Trust {
   score: number;              // 0–100 → grade: ≥85 A/B, 70–84 C, <70 D/F
   scannedAt: string;
   audits: { check: string; status: 'pass' | 'warn' | 'fail'; detail: string }[];
+}
+
+export interface ServerAuditRecord {
+  id: string;
+  status: string;
+  whatUpdated: string;
+  updatedBy: string;
+  auditorRemark: string;
+  date: string;
+}
+
+export interface HealthCheckRecord {
+  timestamp: string;
+  status: string;
+  performedBy: string;
+  responseTimeMs: number;
+}
+
+export interface SkillAuditRecord {
+  action: string;
+  user: string;
+  details: string;
+  when: string;
 }
 
 export interface McpServer {
@@ -34,6 +57,9 @@ export interface McpServer {
   iconName?: string;
   trust: Trust;
   capabilities?: any;
+  auditLogs?: ServerAuditRecord[];
+  healthChecks?: HealthCheckRecord[];
+  disabled?: boolean;
 }
 
 export interface A2AAgent {
@@ -61,6 +87,9 @@ export interface A2AAgent {
   iconName?: string;
   trust: Trust;
   capabilities?: any;
+  auditLogs?: ServerAuditRecord[];
+  healthChecks?: HealthCheckRecord[];
+  disabled?: boolean;
 }
 
 export interface SkillEntity {
@@ -73,7 +102,7 @@ export interface SkillEntity {
   exampleSnippet: string;
   inputs: { name: string; type: string; description: string }[];
   outputs: { name: string; type: string; description: string }[];
-  versions: { version: string; date: string; notes: string }[];
+  versions: { version: string; date: string; notes: string; content?: string }[];
   files: { name: string; kind: 'markdown' | 'script' | 'config' | 'data'; sizeKb: number; updatedAt: string }[];
   sourceUrl: string;
   version: string;
@@ -86,6 +115,15 @@ export interface SkillEntity {
   parentId?: string;
   parentType?: 'mcp' | 'agent';
   trust: Trust;
+  auditLogs?: SkillAuditRecord[];
+  disabled?: boolean;
+}
+
+export interface PromptVersion {
+  version: string;
+  date: string;
+  notes: string;
+  content: string;
 }
 
 export interface PromptEntity {
@@ -105,6 +143,9 @@ export interface PromptEntity {
   ownerName: string;
   iconName: string;
   trust: Trust;
+  version: string;
+  versions: PromptVersion[];
+  disabled?: boolean;
 }
 
 export interface WorkspaceItem {

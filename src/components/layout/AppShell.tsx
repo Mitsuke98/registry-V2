@@ -262,7 +262,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
               <CommandGroup heading="Results">
                 {/* Servers fuzzy search */}
-                {mcpServers.map(s => (
+                {mcpServers.filter(s => s.status === 'approved' && !s.disabled).map(s => (
                   <CommandItem
                     key={s.id}
                     onSelect={() => handleCommandSelect({ route: `/servers/${s.id}` })}
@@ -275,7 +275,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 ))}
 
                 {/* Agents fuzzy search */}
-                {a2aAgents.map(a => (
+                {a2aAgents.filter(a => a.status === 'approved' && !a.disabled).map(a => (
                   <CommandItem
                     key={a.id}
                     onSelect={() => handleCommandSelect({ route: `/agents/${a.id}` })}
@@ -288,7 +288,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 ))}
 
                 {/* Skills fuzzy search */}
-                {skills.map(sk => (
+                {skills.filter(sk => sk.status === 'approved' && !sk.disabled).map(sk => (
                   <CommandItem
                     key={sk.id}
                     onSelect={() => handleCommandSelect({ route: `/skills/${sk.id}` })}
@@ -301,7 +301,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 ))}
 
                 {/* Prompts fuzzy search */}
-                {FEATURES.prompts && prompts.map(p => (
+                {FEATURES.prompts && prompts.filter(p => p.status === 'approved' && !p.disabled).map(p => (
                   <CommandItem
                     key={p.id}
                     onSelect={() => handleCommandSelect({ route: `/prompts/${p.id}` })}

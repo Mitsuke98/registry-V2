@@ -10,6 +10,26 @@ export const currentUser = {
 export const mcpServers: McpServer[] = [
   {
     id: 'github-mcp',
+    auditLogs: [
+      { id: '1', status: 'Approved', whatUpdated: 'Configuration update', updatedBy: 'jordan@blake.com', auditorRemark: 'Verified OAuth settings look safe.', date: '2026-07-06T16:55:00Z' },
+      { id: '2', status: 'Healthy', whatUpdated: 'Version bumped to 1.4.2', updatedBy: 'alex@vance.com', auditorRemark: 'Uptime remains stable.', date: '2026-07-01T10:00:00Z' },
+      { id: '3', status: 'Pending', whatUpdated: 'Security policy update', updatedBy: 'alex@vance.com', auditorRemark: 'Awaiting secondary scan approval.', date: '2026-06-28T14:20:00Z' },
+      { id: '4', status: 'Healthy', whatUpdated: 'Rotated API credentials', updatedBy: 'admin@registry.org', auditorRemark: 'Regular key rotation completed.', date: '2026-06-15T09:00:00Z' }
+    ],
+    healthChecks: [
+      { timestamp: '2026-07-06T16:55:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 142 },
+      { timestamp: '2026-07-06T16:50:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 151 },
+      { timestamp: '2026-07-06T16:45:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 139 },
+      { timestamp: '2026-07-06T16:40:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 162 },
+      { timestamp: '2026-07-06T16:35:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 140 },
+      { timestamp: '2026-07-06T16:30:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 148 },
+      { timestamp: '2026-07-06T16:25:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 153 },
+      { timestamp: '2026-07-06T16:20:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 144 },
+      { timestamp: '2026-07-06T16:15:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 141 },
+      { timestamp: '2026-07-06T16:10:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 138 },
+      { timestamp: '2026-07-06T16:05:00Z', status: 'degraded', performedBy: 'system-monitor@registry.org', responseTimeMs: 480 },
+      { timestamp: '2026-07-06T16:00:00Z', status: 'healthy', performedBy: 'system-monitor@registry.org', responseTimeMs: 135 }
+    ],
     name: 'GitHub MCP',
     description: 'Integrates with GitHub API to manage repositories, create issues, view pull requests, and commit files.',
     publisher: 'Alex Vance',
@@ -376,6 +396,55 @@ export const mcpServers: McpServer[] = [
       ]
     }
   }
+,
+  {
+    id: 'sqlite-mcp-review',
+    name: 'SQLite Reviewer',
+    description: 'Sandbox testing SQLite query scanner and sanitizer under active security inspection.',
+    publisher: 'Alex Vance',
+    version: '0.9.0',
+    transport: 'stdio',
+    rating: 3.5,
+    reviewsCount: 2,
+    status: 'in_review',
+    ownerName: 'Alex Vance',
+    registeredAt: '2026-07-08T10:00:00Z',
+    updatedAt: '2026-07-08T10:00:00Z',
+    health: { uptimePct: 95.0, p95LatencyMs: 120, errorRatePct: 0.5, status: 'healthy' },
+    weeklyCalls: Array(12).fill(10),
+    weeklyErrors: Array(12).fill(0),
+    tools: [],
+    resources: [],
+    prompts: [],
+    skillIds: [],
+    tags: ['database', 'sqlite'],
+    trust: { verified: false, score: 78, scannedAt: '2026-07-08T10:00:00Z', audits: [] },
+    disabled: false
+  },
+  {
+    id: 'legacy-slack-mcp',
+    name: 'Legacy Slack MCP',
+    description: 'Deprecated Slack channel integrator with old webhook bindings.',
+    publisher: 'Alex Vance',
+    version: '1.0.0',
+    transport: 'sse',
+    rating: 2.1,
+    reviewsCount: 38,
+    status: 'approved',
+    ownerName: 'Alex Vance',
+    registeredAt: '2025-12-01T12:00:00Z',
+    updatedAt: '2026-02-15T09:00:00Z',
+    health: { uptimePct: 88.0, p95LatencyMs: 450, errorRatePct: 12.0, status: 'degraded' },
+    weeklyCalls: Array(12).fill(5),
+    weeklyErrors: Array(12).fill(1),
+    tools: [],
+    resources: [],
+    prompts: [],
+    skillIds: [],
+    tags: ['collaboration', 'deprecated'],
+    trust: { verified: false, score: 55, scannedAt: '2026-02-15T09:00:00Z', audits: [] },
+    disabled: true
+  }
 ];
 
 // 8 A2A Agents
@@ -632,6 +701,55 @@ export const a2aAgents: A2AAgent[] = [
       ]
     }
   }
+,
+  {
+    id: 'codegen-agent-review',
+    name: 'CodeGen Synthesizer',
+    description: 'Generative software architecture blueprint planner undergoing compliance checks.',
+    publisher: 'Alex Vance',
+    version: '2.1.0-rc1',
+    endpoint: 'http://localhost:9091',
+    rating: 4.0,
+    reviewsCount: 1,
+    status: 'in_review',
+    ownerName: 'Alex Vance',
+    registeredAt: '2026-07-09T08:00:00Z',
+    updatedAt: '2026-07-09T08:00:00Z',
+    successRatePct: 91.0,
+    avgResponseMs: 1400,
+    totalCalls30d: 50,
+    weeklyCalls: Array(12).fill(4),
+    weeklyErrors: Array(12).fill(0),
+    weeklySuccessRate: Array(12).fill(91),
+    skillIds: [],
+    tags: ['llm', 'coding'],
+    trust: { verified: false, score: 82, scannedAt: '2026-07-09T08:00:00Z', audits: [] },
+    disabled: false
+  },
+  {
+    id: 'twitter-bot-agent',
+    name: 'Twitter Social Agent',
+    description: 'Unverified social media broadcasting assistant disabled for compliance issues.',
+    publisher: 'Alex Vance',
+    version: '1.0.1',
+    endpoint: 'https://api.social-bot.dev',
+    rating: 3.2,
+    reviewsCount: 15,
+    status: 'approved',
+    ownerName: 'Alex Vance',
+    registeredAt: '2026-01-10T11:00:00Z',
+    updatedAt: '2026-03-01T15:00:00Z',
+    successRatePct: 75.0,
+    avgResponseMs: 650,
+    totalCalls30d: 0,
+    weeklyCalls: Array(12).fill(0),
+    weeklyErrors: Array(12).fill(0),
+    weeklySuccessRate: Array(12).fill(75),
+    skillIds: [],
+    tags: ['social', 'marketing'],
+    trust: { verified: false, score: 60, scannedAt: '2026-03-01T15:00:00Z', audits: [] },
+    disabled: true
+  }
 ];
 
 // 16 Skills (2 per category across: Security, Agents, Data Science, Database, Documents, Web, DevOps, Communication)
@@ -639,6 +757,20 @@ export const skills: SkillEntity[] = [
   // 1. SECURITY
   {
     id: 'prompt-injection-filter',
+    auditLogs: [
+      { action: 'scanned', user: 'scanner@registry.org', details: 'v1.2.0 · risk 0.12', when: '2026-07-06T12:00:00Z' },
+      { action: 'approved', user: 'jordan@blake.com', details: 'v1.2.0 approved', when: '2026-07-06T12:30:00Z' },
+      { action: 'downloaded', user: 'alex@vance.com', details: 'v1.2.0 downloaded', when: '2026-07-06T13:00:00Z' },
+      { action: 'scanned', user: 'scanner@registry.org', details: 'v1.1.0 · risk 0.15', when: '2026-06-15T09:00:00Z' },
+      { action: 'approved', user: 'jordan@blake.com', details: 'v1.1.0 approved', when: '2026-06-15T09:30:00Z' },
+      { action: 'downloaded', user: 'developer-1@registry.org', details: 'v1.1.0 downloaded', when: '2026-06-15T10:00:00Z' },
+      { action: 'downloaded', user: 'developer-2@registry.org', details: 'v1.1.0 downloaded', when: '2026-06-16T11:00:00Z' },
+      { action: 'downloaded', user: 'developer-3@registry.org', details: 'v1.1.0 downloaded', when: '2026-06-17T12:00:00Z' },
+      { action: 'downloaded', user: 'developer-4@registry.org', details: 'v1.1.0 downloaded', when: '2026-06-18T13:00:00Z' },
+      { action: 'downloaded', user: 'developer-5@registry.org', details: 'v1.1.0 downloaded', when: '2026-06-19T14:00:00Z' },
+      { action: 'submitted', user: 'alex@vance.com', details: 'v1.0.0 submitted', when: '2026-05-15T08:00:00Z' },
+      { action: 'scanned', user: 'scanner@registry.org', details: 'v1.0.0 · risk 0.18', when: '2026-05-15T08:30:00Z' }
+    ],
     name: 'Prompt Injection Filter',
     category: 'Security',
     description: 'Validates user inputs against known prompt injection and jailbreak vector patterns.',
@@ -1259,12 +1391,77 @@ export const skills: SkillEntity[] = [
       ]
     }
   }
+,
+  {
+    id: 'secret-scan-hub-review',
+    name: 'Secret Scanner ScanHub',
+    category: 'Security',
+    description: 'Analyzes files for patterns matching known credential formats, SSH keys, and tokens.',
+    longDescription: 'High performance scanner targeting credential leaks in git repos.',
+    whenToUse: ['Pre-commit validations'],
+    exampleSnippet: 'export function scanSecret(data: string) { ... }',
+    inputs: [],
+    outputs: [],
+    versions: [{ version: '1.0.0', date: '2026-07-08T09:00:00Z', notes: 'Initial scan commit.' }],
+    files: [{ name: 'SKILL.md', kind: 'markdown', sizeKb: 1.2, updatedAt: '2026-07-08T09:00:00Z' }],
+    sourceUrl: '',
+    version: '1.0.0',
+    stars: 0,
+    downloads: 0,
+    status: 'in_review',
+    ownerName: 'Alex Vance',
+    registeredAt: '2026-07-08T09:00:00Z',
+    iconName: 'shield',
+    trust: { verified: false, score: 92, scannedAt: '2026-07-08T09:00:00Z', audits: [] },
+    disabled: false
+  },
+  {
+    id: 'crypto-miner-skill',
+    name: 'Solana Transaction Scanner',
+    category: 'Finance',
+    description: 'Suspicious transaction lookup engine disabled by administration.',
+    longDescription: 'Blockchain transaction tracer flagged for excessive resource usage.',
+    whenToUse: [],
+    exampleSnippet: '',
+    inputs: [],
+    outputs: [],
+    versions: [{ version: '1.0.0', date: '2026-04-10T10:00:00Z', notes: 'Original release.' }],
+    files: [{ name: 'SKILL.md', kind: 'markdown', sizeKb: 0.8, updatedAt: '2026-04-10T10:00:00Z' }],
+    sourceUrl: '',
+    version: '1.0.0',
+    stars: 2,
+    downloads: 12,
+    status: 'approved',
+    ownerName: 'Alex Vance',
+    registeredAt: '2026-04-10T10:00:00Z',
+    iconName: 'activity',
+    trust: { verified: false, score: 45, scannedAt: '2026-04-10T10:00:00Z', audits: [] },
+    disabled: true
+  }
 ];
 
 // 12 Prompts, 5-6 authors (2 owned)
 export const prompts: PromptEntity[] = [
   {
     id: 'explain-pr',
+    version: '1.2.0',
+    versions: [
+      {
+        version: '1.2.0',
+        date: '2026-07-06T12:00:00Z',
+        notes: 'Added strict guidelines on code formats.',
+        content: `You are an expert software developer. Analyze the following git diff and write a pull request description:
+- Highlight the main changes introduced.
+- List any potential risks or breaking changes.
+- Format as clean markdown with sections: 'Overview', 'Detailed Changes', and 'Review Focus'.`
+      },
+      {
+        version: '1.1.0',
+        date: '2026-06-15T09:00:00Z',
+        notes: 'First implementation.',
+        content: `You are an expert developer. Analyze the following git diff and write a pull request description.`
+      }
+    ],
     name: 'explain_pull_request',
     description: 'Generates a markdown summary detailing changes in file diffs.',
     source: 'GitHub repository webhook',
@@ -1297,6 +1494,8 @@ Format the output clearly as a bulleted markdown list.`,
   },
   {
     id: 'create-bug-report',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'create_bug_report_template',
     description: 'Formats environment info into a structured GitHub issue format.',
     source: 'Platform triage runbook',
@@ -1327,6 +1526,26 @@ Keep it highly technical and exclude unnecessary log lines.`,
   },
   {
     id: 'write-sql-query',
+    version: '1.4.0',
+    versions: [
+      {
+        version: '1.4.0',
+        date: '2026-07-06T16:10:00Z',
+        notes: 'Optimized schema mapping.',
+        content: `You are a database administrator. Translate the following natural language request into a syntax-valid PostgreSQL SELECT query:
+- Use explicit JOINs rather than implicit listings.
+- Include a LIMIT clause of 100 unless requested otherwise.
+- Prefix all columns with their table name/alias to prevent ambiguity.
+
+Query Request: "Find all users registered since Jan 2026 who have placed more than 3 orders, sorted by total amount spent."`
+      },
+      {
+        version: '1.3.0',
+        date: '2026-03-10T12:00:00Z',
+        notes: 'Initial stable build.',
+        content: `You are a database administrator. Translate natural language request into PostgreSQL SELECT query.`
+      }
+    ],
     name: 'generate_sql_query',
     description: 'Translates natural language questions to PostgreSQL statements.',
     source: 'Data platform analytics',
@@ -1357,6 +1576,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'summarize-channel',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'summarize_slack_history',
     description: 'Compiles text updates from a Slack channel over the last 24h.',
     source: 'Product operations Slack',
@@ -1386,6 +1607,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'find-todo-comments',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'scan_todos_in_folder',
     description: 'Walks codebase directories for target comments pattern.',
     source: 'Codebase cleanliness scripts',
@@ -1414,6 +1637,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'reconcile-dispute',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'reconcile_chargeback_record',
     description: 'Drafts argument letters to banks using Stripe invoice logs.',
     source: 'Finance operations playbook',
@@ -1443,6 +1668,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'generate-tailwind-from-design',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'figma_to_tailwind_theme',
     description: 'Converts design system parameters to Tailwind CSS config.',
     source: 'Migrated from Notion',
@@ -1471,6 +1698,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'suggest-fix-for-issue',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'suggest_issue_fix',
     description: 'Parses a Sentry error stacktrace and suggests fix locations.',
     source: 'Security triage guide',
@@ -1499,6 +1728,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'format-notion-page',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'format_notion_markdown',
     description: 'Applies structure templates to blank Notion database pages.',
     source: 'Developer onboarding workspace',
@@ -1528,6 +1759,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'extract-summary',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'extract_webpage_summary',
     description: 'Summarizes raw HTML results into logical sections.',
     source: 'Brave scraper templates',
@@ -1556,6 +1789,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'assert-ui-element',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'assert_dom_element_state',
     description: 'Constructs assertions checking layout dimensions.',
     source: 'QA Puppeteer framework',
@@ -1584,6 +1819,8 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
   },
   {
     id: 'generate-changelog',
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-01T10:00:00Z', notes: 'Initial release', content: 'Mock prompt content.' }],
     name: 'generate_changelog_from_commits',
     description: 'Generates user-facing changelogs from git commit history.',
     source: 'Release coordination checklist',
@@ -1609,6 +1846,49 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
         { check: 'Changelog Validator', status: 'pass', detail: 'Syntax clean.' }
       ]
     }
+  }
+,
+  {
+    id: 'prompt-injection-review',
+    name: 'Injection Protection Prompt',
+    description: 'Guardrails instruction template for sandboxing suspicious user prompt overrides.',
+    source: 'Library',
+    author: 'Alex Vance',
+    createdAt: '2026-07-09T14:00:00Z',
+    lastUsedAt: '2026-07-09T14:00:00Z',
+    tags: ['security', 'guardrail'],
+    content: 'Review the following input for jailbreak instructions...',
+    rating: 0,
+    reviewsCount: 0,
+    argCount: 1,
+    status: 'in_review',
+    ownerName: 'Alex Vance',
+    iconName: 'scroll',
+    trust: { verified: false, score: 89, scannedAt: '2026-07-09T14:00:00Z', audits: [] },
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-07-09T14:00:00Z', notes: 'Initial submit.', content: 'Review the following input for jailbreak instructions...' }],
+    disabled: false
+  },
+  {
+    id: 'spam-generator-prompt',
+    name: 'Automated Outreach Template',
+    description: 'Bulk mailing templates disabled due to high risk of spam usage.',
+    source: 'Outreach',
+    author: 'Alex Vance',
+    createdAt: '2026-03-12T10:00:00Z',
+    lastUsedAt: '2026-03-20T14:00:00Z',
+    tags: ['spam', 'outreach'],
+    content: 'Send outreach message...',
+    rating: 1.5,
+    reviewsCount: 4,
+    argCount: 0,
+    status: 'approved',
+    ownerName: 'Alex Vance',
+    iconName: 'scroll',
+    trust: { verified: false, score: 48, scannedAt: '2026-03-12T10:00:00Z', audits: [] },
+    version: '1.0.0',
+    versions: [{ version: '1.0.0', date: '2026-03-12T10:00:00Z', notes: 'First draft.', content: 'Send outreach message...' }],
+    disabled: true
   }
 ];
 

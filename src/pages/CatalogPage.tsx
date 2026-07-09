@@ -9,8 +9,6 @@ import { StatRow } from '@/components/registry/StatPrimitive';
 import { EntityIcon, ScanGrade, VerifiedBadge, RatingStars, BookmarkToggle } from '@/components/registry/UIHelperKit';
 import { FEATURES } from '@/config/features';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { RatePopover, CopyBlock } from '@/components/registry/UIHelperKit';
 
 export const CatalogPage: React.FC = () => {
   usePageSearch('Search catalog...');
@@ -18,9 +16,6 @@ export const CatalogPage: React.FC = () => {
   const navigate = useNavigate();
   const { mcpServers, a2aAgents, skills, prompts, bookmarks } = useRegistry();
   const { query } = useSearch();
-
-  // Dialog state for prompts detail popup
-  const [selectedPrompt, setSelectedPrompt] = useState<any>(null);
 
   // Facet extraction
   const facet = searchParams.get('facet') || 'all';
@@ -105,10 +100,10 @@ export const CatalogPage: React.FC = () => {
   };
 
   // Approved only lists
-  const approvedServers = mcpServers.filter(s => s.status === 'approved');
-  const approvedAgents = a2aAgents.filter(a => a.status === 'approved');
-  const approvedSkills = skills.filter(s => s.status === 'approved');
-  const approvedPrompts = FEATURES.prompts ? prompts.filter(p => p.status === 'approved') : [];
+  const approvedServers = mcpServers.filter(s => s.status === 'approved' && !s.disabled);
+  const approvedAgents = a2aAgents.filter(a => a.status === 'approved' && !a.disabled);
+  const approvedSkills = skills.filter(s => s.status === 'approved' && !s.disabled);
+  const approvedPrompts = FEATURES.prompts ? prompts.filter(p => p.status === 'approved' && !p.disabled) : [];
 
   // Bookmark count for current facet
   const getBookmarksCount = () => {
@@ -163,11 +158,7 @@ export const CatalogPage: React.FC = () => {
   const filteredItems = getFilteredItems();
 
   const handleItemClick = (item: any) => {
-    if (item.kind === 'prompt') {
-      setSelectedPrompt(item);
-    } else {
-      navigate(`/${item.kind}s/${item.id}`);
-    }
+    navigate(`/${item.kind}s/${item.id}`);
   };
 
   // Columns definition for DataTable list view
@@ -300,38 +291,6 @@ export const CatalogPage: React.FC = () => {
         </div>
       ) : (
         <DataTable columns={columns} data={filteredItems} onRowClick={handleItemClick} />
-      )}
-
-      {/* Prompts detail popup dialog */}
-      {selectedPrompt && (
-        <Dialog open={!!selectedPrompt} onOpenChange={() => setSelectedPrompt(null)}>
-          <DialogContent className="max-w-2xl bg-popover border border-border rounded-lg shadow-xl p-6">
-            <DialogHeader className="flex flex-row justify-between items-start gap-4 border-b border-border pb-4">
-              <div>
-                <DialogTitle className="text-lg font-bold text-foreground flex items-center gap-2">
-                  <EntityIcon kind="prompt" className="size-5" />
-                  <span>{selectedPrompt.name}</span>
-                </DialogTitle>
-                <div className="flex flex-wrap items-center gap-2 mt-2 select-none">
-                  {selectedPrompt.trust.verified && <VerifiedBadge />}
-                  <ScanGrade score={selectedPrompt.trust.score} />
-                  <span className="text-xs text-muted-foreground">by {selectedPrompt.author}</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                <BookmarkToggle kind="prompt" id={selectedPrompt.id} />
-                <RatePopover kind="prompt" id={selectedPrompt.id} />
-              </div>
-            </DialogHeader>
-            <div className="space-y-4 pt-4">
-              <p className="text-sm text-muted-foreground leading-relaxed">{selectedPrompt.description}</p>
-              <div className="space-y-2">
-                <span className="text-xs font-semibold text-foreground uppercase tracking-wider select-none">Prompt Content</span>
-                <CopyBlock code={selectedPrompt.content} />
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
       )}
     </div>
   );

@@ -35,12 +35,22 @@ interface RegistryContextType {
   registerItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', details: any) => void;
   approveItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
   declineItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
+  rejectItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
+  markInReview: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
+  updateItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, details: any) => void;
+  setItemDisabled: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, disabled: boolean) => void;
   getUsedBy: (skillId: string) => { servers: McpServer[]; agents: A2AAgent[] };
   getApprovals: () => { waitingOnYou: TransferRequest[]; yourSubmissions: any[]; registrationQueue: any[] };
   getAttentionItems: () => any[];
   getPerformanceRanking: () => any[];
   getPlatformStatus: () => { healthy: boolean; message: string };
   toggleServerHealth: (id: string) => void;
+  enabledCapabilities: Record<string, boolean>;
+  toggleCapability: (itemKey: string, capabilityKind: string, capabilityName: string) => void;
+  skillComments: Record<string, { author: string; date: string; text: string; initials: string }[]>;
+  promptComments: Record<string, { author: string; date: string; text: string; initials: string }[]>;
+  addComment: (kind: 'skill' | 'prompt', id: string, text: string) => void;
+  deleteItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
 }
 
 const RegistryContext = createContext<RegistryContextType | undefined>(undefined);
@@ -60,6 +70,65 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
     prompt: preseededBookmarks.prompt
   });
   const [userRatings, setUserRatings] = useState<Record<string, number>>({});
+  const [enabledCapabilities, setEnabledCapabilities] = useState<Record<string, boolean>>({});
+  const [skillComments, setSkillComments] = useState<Record<string, { author: string; date: string; text: string; initials: string }[]>>({});
+  const [promptComments, setPromptComments] = useState<Record<string, { author: string; date: string; text: string; initials: string }[]>>({});
+
+  const toggleCapability = (itemKey: string, capabilityKind: string, capabilityName: string) => {
+    const key = `${itemKey}:${capabilityKind}:${capabilityName}`;
+    setEnabledCapabilities(prev => ({
+      ...prev,
+      [key]: !(prev[key] ?? true)
+    }));
+  };
+
+  const addComment = (kind: 'skill' | 'prompt', id: string, text: string) => {
+    if (!currentUser) return;
+    const newComment = {
+      author: currentUser.name,
+      date: new Date().toISOString(),
+      text,
+      initials: currentUser.initials || currentUser.name.split(' ').map(n => n[0]).join('')
+    };
+    if (kind === 'skill') {
+      setSkillComments(prev => ({
+        ...prev,
+        [id]: [...(prev[id] || []), newComment]
+      }));
+    } else {
+      setPromptComments(prev => ({
+        ...prev,
+        [id]: [...(prev[id] || []), newComment]
+      }));
+    }
+  };
+
+  const deleteItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
+    if (kind === 'server') {
+      setServers(prev => prev.filter(s => s.id !== id));
+    } else if (kind === 'agent') {
+      setAgents(prev => prev.filter(a => a.id !== id));
+    } else if (kind === 'skill') {
+      setSkillsList(prev => prev.filter(s => s.id !== id));
+    } else if (kind === 'prompt') {
+      setPromptsList(prev => prev.filter(p => p.id !== id));
+    }
+
+    setWorkspaces(prev => prev.map(ws => ({
+      ...ws,
+      items: ws.items.filter(item => !(item.kind === kind && item.id === id))
+    })));
+
+    setBookmarks(prev => {
+      const list = prev[kind] || [];
+      return {
+        ...prev,
+        [kind]: list.filter(item => item !== id)
+      };
+    });
+
+    setTransferRequests(prev => prev.filter(req => !(req.itemKind === kind && req.itemId === id)));
+  };
 
   // Derive ownedByUser and ownerIsCurrentUser dynamically based on currentUser
   const derivedServers = servers.map(s => ({
@@ -137,6 +206,7 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const approveItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
+    if (currentUser?.role !== 'super_admin') return;
     if (kind === 'server') {
       setServers(prev => prev.map(s => s.id === id ? { ...s, status: 'approved' } : s));
     } else if (kind === 'agent') {
@@ -149,6 +219,7 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const declineItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
+    if (currentUser?.role !== 'super_admin') return;
     if (kind === 'server') {
       setServers(prev => prev.map(s => s.id === id ? { ...s, status: 'rejected' } : s));
     } else if (kind === 'agent') {
@@ -157,6 +228,47 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
       setSkillsList(prev => prev.map(sk => sk.id === id ? { ...sk, status: 'rejected' } : sk));
     } else if (kind === 'prompt') {
       setPromptsList(prev => prev.map(p => p.id === id ? { ...p, status: 'rejected' } : p));
+    }
+  };
+
+  const rejectItem = declineItem;
+
+  const markInReview = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
+    if (currentUser?.role !== 'super_admin') return;
+    if (kind === 'server') {
+      setServers(prev => prev.map(s => s.id === id ? { ...s, status: 'in_review' } : s));
+    } else if (kind === 'agent') {
+      setAgents(prev => prev.map(a => a.id === id ? { ...a, status: 'in_review' } : a));
+    } else if (kind === 'skill') {
+      setSkillsList(prev => prev.map(sk => sk.id === id ? { ...sk, status: 'in_review' } : sk));
+    } else if (kind === 'prompt') {
+      setPromptsList(prev => prev.map(p => p.id === id ? { ...p, status: 'in_review' } : p));
+    }
+  };
+
+  const setItemDisabled = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, disabled: boolean) => {
+    if (currentUser?.role !== 'super_admin') return;
+    if (kind === 'server') {
+      setServers(prev => prev.map(s => s.id === id ? { ...s, disabled } : s));
+    } else if (kind === 'agent') {
+      setAgents(prev => prev.map(a => a.id === id ? { ...a, disabled } : a));
+    } else if (kind === 'skill') {
+      setSkillsList(prev => prev.map(sk => sk.id === id ? { ...sk, disabled } : sk));
+    } else if (kind === 'prompt') {
+      setPromptsList(prev => prev.map(p => p.id === id ? { ...p, disabled } : p));
+    }
+  };
+
+  const updateItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, details: any) => {
+    if (currentUser?.role !== 'super_admin') return;
+    if (kind === 'server') {
+      setServers(prev => prev.map(s => s.id === id ? { ...s, ...details } : s));
+    } else if (kind === 'agent') {
+      setAgents(prev => prev.map(a => a.id === id ? { ...a, ...details } : a));
+    } else if (kind === 'skill') {
+      setSkillsList(prev => prev.map(sk => sk.id === id ? { ...sk, ...details } : sk));
+    } else if (kind === 'prompt') {
+      setPromptsList(prev => prev.map(p => p.id === id ? { ...p, ...details } : p));
     }
   };
 
@@ -265,7 +377,9 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         status: 'pending',
         ownerName: currentUser.name,
         iconName: details.iconName || 'scroll',
-        trust: trustBlock
+        trust: trustBlock,
+        version: details.version || '1.0.0',
+        versions: details.versions || [{ version: details.version || '1.0.0', date: isoDate, notes: 'Initial registration.', content: details.content || '' }]
       };
       setPromptsList(prev => [...prev, newPrompt]);
     }
@@ -520,12 +634,22 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         registerItem,
         approveItem,
         declineItem,
+        rejectItem,
+        markInReview,
+        updateItem,
+        setItemDisabled,
         getUsedBy,
         getApprovals,
         getAttentionItems,
         getPerformanceRanking,
         getPlatformStatus,
-        toggleServerHealth
+        toggleServerHealth,
+        enabledCapabilities,
+        toggleCapability,
+        skillComments,
+        promptComments,
+        addComment,
+        deleteItem
       }}
     >
       {children}

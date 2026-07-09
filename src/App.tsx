@@ -12,6 +12,7 @@ import { CatalogPage } from '@/pages/CatalogPage';
 import { ServerDetailPage } from '@/pages/ServerDetailPage';
 import { AgentDetailPage } from '@/pages/AgentDetailPage';
 import { SkillDetailPage } from '@/pages/SkillDetailPage';
+import { PromptDetailPage } from '@/pages/PromptDetailPage';
 import { WorkspacesPage } from '@/pages/WorkspacesPage';
 import { WorkspaceDetailPage } from '@/pages/WorkspaceDetailPage';
 import { RegisterPage } from '@/pages/RegisterPage';
@@ -38,6 +39,7 @@ function AppContent() {
         <Route path="/servers/:id" element={<ServerDetailPage />} />
         <Route path="/agents/:id" element={<AgentDetailPage />} />
         <Route path="/skills/:id" element={<SkillDetailPage />} />
+        <Route path="/prompts/:id" element={<PromptDetailPage />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
         <Route path="/register" element={<RegisterPage />} />

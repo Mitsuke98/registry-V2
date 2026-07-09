@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRegistry } from '@/data/RegistryContext';
 import { useSearch, usePageSearch } from '@/context/SearchContext';
@@ -58,7 +58,7 @@ export const WorkspaceDetailPage: React.FC = () => {
 
     // Apply Pending Filter
     if (filterPending) {
-      filtered = filtered.filter(item => item.status === 'pending' || item.status === 'rejected');
+      filtered = filtered.filter(item => item.status === 'pending' || item.status === 'in_review' || item.status === 'rejected');
     }
 
     // Apply Search Query
@@ -71,23 +71,30 @@ export const WorkspaceDetailPage: React.FC = () => {
 
   const filteredItems = getWorkspaceItems();
 
-  // Compute pending items registered by this user
+  // Compute pending items registered by this user (including pending + in_review)
   const userPendingItems = [
-    ...mcpServers.filter(s => s.ownerName === currentUser?.name && s.status === 'pending').map(s => ({ ...s, kind: 'server' })),
-    ...a2aAgents.filter(a => a.ownerName === currentUser?.name && a.status === 'pending').map(a => ({ ...a, kind: 'agent' })),
-    ...skills.filter(sk => sk.ownerName === currentUser?.name && sk.status === 'pending').map(sk => ({ ...sk, kind: 'skill' })),
-    ...prompts.filter(p => p.ownerName === currentUser?.name && p.status === 'pending').map(p => ({ ...p, kind: 'prompt' }))
+    ...mcpServers.filter(s => s.ownerName === currentUser?.name && (s.status === 'pending' || s.status === 'in_review')).map(s => ({ ...s, kind: 'server' })),
+    ...a2aAgents.filter(a => a.ownerName === currentUser?.name && (a.status === 'pending' || a.status === 'in_review')).map(a => ({ ...a, kind: 'agent' })),
+    ...skills.filter(sk => sk.ownerName === currentUser?.name && (sk.status === 'pending' || sk.status === 'in_review')).map(sk => ({ ...sk, kind: 'skill' })),
+    ...prompts.filter(p => p.ownerName === currentUser?.name && (p.status === 'pending' || p.status === 'in_review')).map(p => ({ ...p, kind: 'prompt' }))
   ];
 
   const pendingCount = userPendingItems.length;
 
-  const pendingByKind: Record<string, number> = {};
-  userPendingItems.forEach(item => {
-    pendingByKind[item.kind] = (pendingByKind[item.kind] || 0) + 1;
-  });
-  const pendingCaption = Object.entries(pendingByKind)
-    .map(([kind, count]) => `${count} ${kind}${count > 1 ? 's' : ''}`)
-    .join(' · ') || 'No pending approval items';
+  const pendingStats = useMemo(() => {
+    let pCount = 0;
+    let rCount = 0;
+    userPendingItems.forEach(item => {
+      if (item.status === 'pending') pCount++;
+      else if (item.status === 'in_review') rCount++;
+    });
+    const parts = [];
+    if (pCount > 0) parts.push(`${pCount} pending`);
+    if (rCount > 0) parts.push(`${rCount} in review`);
+    return parts.join(' · ') || 'No pending approvals';
+  }, [userPendingItems]);
+
+  const pendingCaption = pendingStats;
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('en-US', {

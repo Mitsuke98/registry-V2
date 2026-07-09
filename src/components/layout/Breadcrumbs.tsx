@@ -13,7 +13,7 @@ import {
 
 export const Breadcrumbs: React.FC = () => {
   const location = useLocation();
-  const { mcpServers, a2aAgents, skills, workspaces } = useRegistry();
+  const { mcpServers, a2aAgents, skills, workspaces, prompts } = useRegistry();
   const detailTabContext = useDetailTab();
   const activeTab = detailTabContext?.activeTab;
 
@@ -92,12 +92,16 @@ export const Breadcrumbs: React.FC = () => {
 
     } else if (seg0 === 'prompts') {
       items.push({ label: 'Prompt Store', path: '/prompts' });
-      if (!seg1) {
+      if (!seg1 || seg1 === 'explore') {
         items.push({ label: 'Explore', path: '/prompts' });
       } else if (seg1 === 'starred') {
         items.push({ label: 'Starred', path: '/prompts/starred' });
       } else if (seg1 === 'register') {
         items.push({ label: 'Register prompt', path: '/prompts/register' });
+      } else {
+        const prompt = prompts.find((p) => p.id === seg1);
+        items.push({ label: prompt?.name ?? seg1, path: `/prompts/${seg1}` });
+        if (activeTab) items.push({ label: fmtTab(activeTab), path: '' });
       }
     }
 
