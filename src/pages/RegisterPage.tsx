@@ -17,13 +17,17 @@ export const RegisterPage: React.FC = () => {
   usePageSearch('Register assets...');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { registerItem, currentUser } = useRegistry();
+  const { registerItem, currentUser, workspaces } = useRegistry();
 
   const kind = searchParams.get('kind') as 'server' | 'agent' | 'prompt' | 'skill' | null;
 
   // Global wizard state
   const [currentStep, setCurrentStep] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  // Initial visibility states
+  const [initialGlobal, setInitialGlobal] = useState(false);
+  const [initialWorkspaceIds, setInitialWorkspaceIds] = useState<string[]>([]);
 
   // ----------------------------------------------------
   // Form values (MCP / Agent / Prompt / Skill)
@@ -97,6 +101,8 @@ export const RegisterPage: React.FC = () => {
   useEffect(() => {
     setCurrentStep(0);
     setIsSuccess(false);
+    setInitialGlobal(false);
+    setInitialWorkspaceIds([]);
   }, [kind]);
 
   // Sync toolbar active state for contentEditable changelog editor
@@ -419,9 +425,71 @@ export const RegisterPage: React.FC = () => {
       };
     }
 
-    registerItem(kind!, itemDetails);
+    const finalDetails = {
+      ...itemDetails,
+      visibility: {
+        global: initialGlobal,
+        workspaceIds: initialWorkspaceIds
+      }
+    };
+
+    registerItem(kind!, finalDetails);
     setIsSuccess(true);
     toast.success('Submitted for approval — a super admin will review it');
+  };
+
+  const renderInitialVisibilityBlock = () => {
+    if (!currentUser) return null;
+    const userTeams = workspaces.filter(w => w.kind === 'team' && w.members.includes(currentUser.name));
+
+    return (
+      <div className="p-4 border border-border rounded-xl space-y-3 bg-muted/5">
+        <div className="border-b border-border/40 pb-1.5 mb-2">
+          <span className="font-bold text-foreground">Initial Visibility Settings</span>
+          <span className="text-[10px] text-muted-foreground block mt-0.5">Configure initial visibility to apply immediately when approved.</span>
+        </div>
+
+        <div className="flex items-center justify-between p-2.5 rounded-lg border bg-background">
+          <div className="flex flex-col select-none">
+            <span className="text-[11px] font-semibold text-foreground">Global Catalog Listing</span>
+            <span className="text-[10px] text-muted-foreground">List this asset globally in the catalog.</span>
+          </div>
+          <input
+            type="checkbox"
+            checked={initialGlobal}
+            onChange={e => setInitialGlobal(e.target.checked)}
+            className="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+          />
+        </div>
+
+        {userTeams.length > 0 && (
+          <div className="space-y-1.5">
+            <label className="text-[11px] text-muted-foreground font-semibold select-none">Share to Workspace(s)</label>
+            <div className="max-h-28 overflow-y-auto border border-border rounded-lg p-2 space-y-1 bg-background">
+              {userTeams.map(ws => (
+                <label key={ws.id} className="flex items-center gap-2 text-xs text-foreground cursor-pointer hover:bg-accent/40 p-0.5 rounded">
+                  <input
+                    type="checkbox"
+                    checked={initialWorkspaceIds.includes(ws.id)}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setInitialWorkspaceIds([...initialWorkspaceIds, ws.id]);
+                      } else {
+                        setInitialWorkspaceIds(initialWorkspaceIds.filter(id => id !== ws.id));
+                      }
+                    }}
+                    className="size-3.5 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                  />
+                  <div className="flex flex-col select-none">
+                    <span className="font-semibold text-[11px] leading-tight">{ws.name}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ----------------------------------------------------
@@ -830,6 +898,7 @@ export const RegisterPage: React.FC = () => {
                       </div>
                     )}
                   </div>
+                  {renderInitialVisibilityBlock()}
                 </div>
 
                 <div className="p-3 bg-amber-500/5 text-amber-600 dark:text-amber-400 border border-amber-500/10 rounded-lg text-[11px] leading-relaxed flex items-start gap-2 select-none">
@@ -933,6 +1002,7 @@ export const RegisterPage: React.FC = () => {
                       <span>Ready for queue submission</span>
                     </div>
                   </div>
+                  {renderInitialVisibilityBlock()}
                 </div>
               </div>
             )}
@@ -1191,6 +1261,7 @@ export const RegisterPage: React.FC = () => {
                     </div>
                     <div className="text-[10px] text-muted-foreground font-mono">Risk score: 0.18 · Hash: SHA-256 (Deterministic verified)</div>
                   </div>
+                  {renderInitialVisibilityBlock()}
                 </div>
               </div>
             )}

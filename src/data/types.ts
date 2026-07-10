@@ -60,6 +60,10 @@ export interface McpServer {
   auditLogs?: ServerAuditRecord[];
   healthChecks?: HealthCheckRecord[];
   disabled?: boolean;
+  visibility?: {
+    global: boolean;
+    workspaceIds: string[];
+  };
 }
 
 export interface A2AAgent {
@@ -90,6 +94,10 @@ export interface A2AAgent {
   auditLogs?: ServerAuditRecord[];
   healthChecks?: HealthCheckRecord[];
   disabled?: boolean;
+  visibility?: {
+    global: boolean;
+    workspaceIds: string[];
+  };
 }
 
 export interface SkillEntity {
@@ -117,6 +125,10 @@ export interface SkillEntity {
   trust: Trust;
   auditLogs?: SkillAuditRecord[];
   disabled?: boolean;
+  visibility?: {
+    global: boolean;
+    workspaceIds: string[];
+  };
 }
 
 export interface PromptVersion {
@@ -146,11 +158,10 @@ export interface PromptEntity {
   version: string;
   versions: PromptVersion[];
   disabled?: boolean;
-}
-
-export interface WorkspaceItem {
-  kind: 'server' | 'agent' | 'skill' | 'prompt';
-  id: string;
+  visibility?: {
+    global: boolean;
+    workspaceIds: string[];
+  };
 }
 
 export interface Workspace {
@@ -161,23 +172,11 @@ export interface Workspace {
   ownerName: string;
   ownerIsCurrentUser: boolean;
   members: string[];          // display names
-  items: WorkspaceItem[];
   createdAt: string;
 }
 
-export interface TransferRequest {
-  id: string;
-  itemKind: 'server' | 'agent' | 'skill' | 'prompt';
-  itemId: string;
-  fromWorkspaceId: string;
-  toWorkspaceId: string;
-  requestedBy: string;
-  requestedAt: string;
-  status: 'pending' | 'approved' | 'declined';
-}
-
 export interface PlatformActivityEntry {
-  iconKind: 'approval' | 'version' | 'transfer';
+  iconKind: 'approval' | 'version';
   text: string;
   timeAgo: string;
   route: string;

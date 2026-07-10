@@ -12,7 +12,7 @@ import { SmartTable } from '@/components/registry/SmartTable';
 import { VersionsTable } from '@/components/registry/VersionsTable';
 import { CompareDialog } from '@/components/registry/CompareDialog';
 import { CopyHashField } from '@/components/registry/CopyHashField';
-import { StatusBadge, RatePopover, BookmarkToggle, EmptyState } from '@/components/registry/UIHelperKit';
+import { StatusBadge, RatePopover, BookmarkToggle, EmptyState, VisibilityPopover } from '@/components/registry/UIHelperKit';
 import { Download, Trash2, Send, FileText, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -23,10 +23,12 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { EditAssetDialog } from '@/components/registry/EditAssetDialog';
+import { Edit } from 'lucide-react';
 
 export const SkillDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { skills, currentUser, deleteItem, skillComments, addComment, getUsedBy } = useRegistry();
+  const { skills, currentUser, deleteItem, skillComments, addComment, getUsedBy, can, updateItem, setItemDisabled } = useRegistry();
   const detailTabContext = useDetailTab();
 
   const [activeTab, setActiveTabLocal] = useState('overview');
@@ -35,6 +37,7 @@ export const SkillDetailPage: React.FC = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<any | null>(null);
   const [commentText, setCommentText] = useState('');
+  const [isEditOpen, setIsEditOpen] = useState(false);
 
   // Trend Chart range
   const [trendRange, setTrendRange] = useState<'all' | '30d' | '7d'>('all');
@@ -261,6 +264,11 @@ ${JSON.stringify(skill.outputs, null, 2)}
         badgeCluster={
           <>
             <StatusBadge status={skill.status} />
+            {skill.disabled && (
+              <span className="text-[10px] font-bold border border-red-500/20 bg-red-500/5 text-red-600 px-1.5 py-0.5 rounded uppercase leading-none">
+                Disabled
+              </span>
+            )}
             <span className="inline-flex items-center text-[11px] font-semibold text-primary bg-primary/5 px-2.5 py-0.5 rounded-full border border-primary/20">
               Confidence {skill.trust.score}/100
             </span>
@@ -281,6 +289,37 @@ ${JSON.stringify(skill.outputs, null, 2)}
           <>
             <BookmarkToggle kind="skill" id={skill.id} />
             <RatePopover kind="skill" id={skill.id} />
+            <VisibilityPopover kind="skill" id={skill.id} />
+
+            {can('edit', skill) && (
+              <Button variant="outline" onClick={() => setIsEditOpen(true)} className="h-9 text-xs font-semibold gap-1.5 cursor-pointer">
+                <Edit className="size-3.5" />
+                <span>Edit</span>
+              </Button>
+            )}
+
+            {can('delete', skill) && (
+              <Button variant="destructive" onClick={() => setDeleteOpen(true)} className="h-9 text-xs font-semibold gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer">
+                <Trash2 className="size-3.5" />
+                <span>Delete</span>
+              </Button>
+            )}
+
+            {can('toggle-disabled', skill) && (
+              <div className="flex items-center gap-2 border border-border rounded-lg px-3 h-9 bg-background select-none">
+                <span className="text-xs text-muted-foreground font-semibold">Enabled</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!skill.disabled}
+                    onChange={() => setItemDisabled('skill', skill.id, !skill.disabled)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4 bg-muted/80 rounded-full peer peer-focus:ring-1 peer-focus:ring-primary/20 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary relative"></div>
+                </label>
+              </div>
+            )}
+
             <button
               onClick={handleDownload}
               className="h-9 px-4 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/95 rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
@@ -288,15 +327,6 @@ ${JSON.stringify(skill.outputs, null, 2)}
               <Download className="size-4" />
               <span>Download</span>
             </button>
-            {currentUser?.role === 'super_admin' && (
-              <button
-                onClick={() => setDeleteOpen(true)}
-                className="h-9 px-3 rounded-lg border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-600 inline-flex items-center gap-1.5 cursor-pointer text-xs font-semibold"
-              >
-                <Trash2 className="size-4" />
-                <span>Delete</span>
-              </button>
-            )}
           </>
         }
       />
@@ -764,6 +794,16 @@ ${JSON.stringify(skill.outputs, null, 2)}
           </DialogContent>
         </Dialog>
       )}
+      {/* EDIT DIALOG */}
+      <EditAssetDialog
+        isOpen={isEditOpen}
+        onOpenChange={setIsEditOpen}
+        kind="skill"
+        item={skill}
+        onSave={updates => {
+          updateItem('skill', skill.id, updates);
+        }}
+      />
     </div>
   );
 };

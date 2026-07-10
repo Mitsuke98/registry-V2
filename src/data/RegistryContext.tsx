@@ -1,20 +1,41 @@
 import React, { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { McpServer, A2AAgent, SkillEntity, PromptEntity, Workspace, TransferRequest } from './types';
+import type { McpServer, A2AAgent, SkillEntity, PromptEntity, Workspace } from './types';
 import {
   mcpServers as initialMcpServers,
   a2aAgents as initialA2aAgents,
   skills as initialSkills,
   prompts as initialPrompts,
   workspaces as initialWorkspaces,
-  transferRequests as initialTransferRequests,
   preseededBookmarks
 } from './fixtures';
+
+import { toast } from 'sonner';
+
+export type Role = 'end_user' | 'super_admin';
 
 export interface UserSession {
   name: string;
   initials: string;
-  role: 'end_user' | 'super_admin';
+  role: Role;
+}
+
+export type Action = 'register' | 'edit' | 'delete' | 'toggle-disabled'
+            | 'approve' | 'crud-workspace' | 'manage-members' | 'revert' | 'set-visibility';
+
+export interface ChangeRecord {
+  id: string;
+  timestamp: string;
+  actor: string;
+  actorRole: Role;
+  action: 'edit' | 'delete' | 'disable' | 'enable'
+        | 'workspace-create' | 'workspace-edit' | 'workspace-delete'
+        | 'member-add' | 'member-remove' | 'visibility';
+  targetKind: string;
+  targetId: string;
+  targetName: string;
+  summary: string;
+  snapshot: any;
 }
 
 interface RegistryContextType {
@@ -25,13 +46,10 @@ interface RegistryContextType {
   skills: SkillEntity[];
   prompts: PromptEntity[];
   workspaces: Workspace[];
-  transferRequests: TransferRequest[];
   bookmarks: Record<string, string[]>;
   userRatings: Record<string, number>;
   toggleBookmark: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
   rateItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, value: number) => void;
-  requestTransfer: (itemId: string, itemKind: 'server' | 'agent' | 'skill' | 'prompt', fromWorkspaceId: string, toWorkspaceId: string) => void;
-  resolveTransfer: (requestId: string, status: 'approved' | 'declined') => void;
   registerItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', details: any) => void;
   approveItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
   declineItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
@@ -39,8 +57,9 @@ interface RegistryContextType {
   markInReview: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
   updateItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, details: any) => void;
   setItemDisabled: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, disabled: boolean) => void;
+  setItemVisibility: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, visibility: { global: boolean; workspaceIds: string[] }) => void;
   getUsedBy: (skillId: string) => { servers: McpServer[]; agents: A2AAgent[] };
-  getApprovals: () => { waitingOnYou: TransferRequest[]; yourSubmissions: any[]; registrationQueue: any[] };
+  getApprovals: () => { yourSubmissions: any[]; registrationQueue: any[] };
   getAttentionItems: () => any[];
   getPerformanceRanking: () => any[];
   getPlatformStatus: () => { healthy: boolean; message: string };
@@ -51,18 +70,71 @@ interface RegistryContextType {
   promptComments: Record<string, { author: string; date: string; text: string; initials: string }[]>;
   addComment: (kind: 'skill' | 'prompt', id: string, text: string) => void;
   deleteItem: (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => void;
+  can: (action: Action, subject?: any) => boolean;
+  changeHistory: ChangeRecord[];
+  revertChange: (id: string) => void;
+  createWorkspace: (ws: Omit<Workspace, 'id' | 'createdAt' | 'ownerIsCurrentUser'>) => void;
+  updateWorkspace: (id: string, ws: Partial<Omit<Workspace, 'id' | 'createdAt' | 'ownerIsCurrentUser'>>) => void;
+  deleteWorkspace: (id: string) => void;
 }
 
 const RegistryContext = createContext<RegistryContextType | undefined>(undefined);
 
 export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
-  const [servers, setServers] = useState<McpServer[]>(initialMcpServers);
-  const [agents, setAgents] = useState<A2AAgent[]>(initialA2aAgents);
-  const [skillsList, setSkillsList] = useState<SkillEntity[]>(initialSkills);
-  const [promptsList, setPromptsList] = useState<PromptEntity[]>(initialPrompts);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(initialWorkspaces);
-  const [transferRequests, setTransferRequests] = useState<TransferRequest[]>(initialTransferRequests);
+
+  const { migratedServers, migratedAgents, migratedSkills, migratedPrompts } = React.useMemo(() => {
+    const workspaceMappings: Record<string, string[]> = {
+      'chart-builder': ['design-systems-team'],
+      'meeting-summarizer': ['design-systems-team'],
+      'postgres-mcp': ['data-platform-team'],
+      'anomaly-detection': ['data-platform-team'],
+      'sentiment-analyzer': ['data-platform-team'],
+      'schema-migrator': ['data-platform-team'],
+      'sql-query-guard': ['data-platform-team'],
+      'prompt-injection-filter': ['security-guild'],
+      'dependency-vulnerability-scanner': ['security-guild'],
+      'docker-sanity-check': ['security-guild']
+    };
+
+    const migrateItem = (item: any) => {
+      if (item.id === 'stripe-mcp') {
+        return {
+          ...item,
+          ownerName: 'Alex Vance',
+          status: 'approved',
+          visibility: {
+            global: false,
+            workspaceIds: []
+          }
+        };
+      }
+      const wsIds = workspaceMappings[item.id] || [];
+      const isGlobal = item.id === 'stripe-mcp' ? false : (wsIds.length === 0 || item.id === 'postgres-mcp' || item.id === 'prompt-injection-filter');
+      return {
+        ...item,
+        visibility: {
+          global: isGlobal,
+          workspaceIds: wsIds
+        }
+      };
+    };
+
+    return {
+      migratedServers: initialMcpServers.map(migrateItem),
+      migratedAgents: initialA2aAgents.map(migrateItem),
+      migratedSkills: initialSkills.map(migrateItem),
+      migratedPrompts: initialPrompts.map(migrateItem)
+    };
+  }, []);
+
+  const [servers, setServers] = useState<McpServer[]>(migratedServers);
+  const [agents, setAgents] = useState<A2AAgent[]>(migratedAgents);
+  const [skillsList, setSkillsList] = useState<SkillEntity[]>(migratedSkills);
+  const [promptsList, setPromptsList] = useState<PromptEntity[]>(migratedPrompts);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(() =>
+    initialWorkspaces.map(({ items, ...rest }: any) => rest)
+  );
   const [bookmarks, setBookmarks] = useState<Record<string, string[]>>({
     server: preseededBookmarks.server,
     agent: preseededBookmarks.agent,
@@ -103,7 +175,389 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
+  const [changeHistory, setChangeHistory] = useState<ChangeRecord[]>([]);
+
+  const can = (action: Action, subject?: any): boolean => {
+    if (!currentUser) return false;
+    const { role, name } = currentUser;
+
+    if (action === 'register') {
+      return role === 'end_user';
+    }
+
+    if (action === 'edit' || action === 'delete' || action === 'toggle-disabled' || action === 'set-visibility') {
+      if (!subject) return false;
+      return role === 'super_admin' || subject.ownerName === name;
+    }
+
+    if (action === 'approve') {
+      return role === 'super_admin';
+    }
+
+    if (action === 'crud-workspace' || action === 'manage-members') {
+      if (subject) {
+        if (subject.kind === 'personal') return false;
+      }
+      return role === 'super_admin';
+    }
+
+    if (action === 'revert') {
+      if (!subject) return false;
+      return role === 'super_admin' || subject.actor === name;
+    }
+
+    return false;
+  };
+
+  const pushChange = (
+    action: ChangeRecord['action'],
+    targetKind: string,
+    targetId: string,
+    targetName: string,
+    summary: string,
+    snapshot: any
+  ): string => {
+    if (!currentUser) return '';
+    const id = `change-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const record: ChangeRecord = {
+      id,
+      timestamp: new Date().toISOString(),
+      actor: currentUser.name,
+      actorRole: currentUser.role,
+      action,
+      targetKind,
+      targetId,
+      targetName,
+      summary,
+      snapshot
+    };
+    setChangeHistory(prev => [record, ...prev].slice(0, 20));
+    return id;
+  };
+
+  const getRawItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
+    if (kind === 'server') return servers.find(s => s.id === id);
+    if (kind === 'agent') return agents.find(a => a.id === id);
+    if (kind === 'skill') return skillsList.find(s => s.id === id);
+    return promptsList.find(p => p.id === id);
+  };
+
+  const createWorkspace = (wsDetails: Omit<Workspace, 'id' | 'createdAt' | 'ownerIsCurrentUser'>) => {
+    if (!can('crud-workspace')) {
+      toast.error('Permission denied to create workspace.');
+      return;
+    }
+    const id = `ws-${Date.now()}`;
+    const newWs: Workspace = {
+      ...wsDetails,
+      id,
+      createdAt: new Date().toISOString(),
+      ownerIsCurrentUser: true
+    };
+    setWorkspaces(prev => [...prev, newWs]);
+
+    const changeId = pushChange(
+      'workspace-create',
+      'workspace',
+      id,
+      wsDetails.name,
+      `Created workspace ${wsDetails.name}`,
+      { id }
+    );
+
+    toast.success(`Created workspace "${wsDetails.name}"`, {
+      action: {
+        label: 'Undo',
+        onClick: () => revertChange(changeId)
+      }
+    });
+  };
+
+  const updateWorkspace = (id: string, wsDetails: Partial<Omit<Workspace, 'id' | 'createdAt' | 'ownerIsCurrentUser'>>) => {
+    const ws = workspaces.find(w => w.id === id);
+    if (!ws) return;
+    if (!can('crud-workspace', ws) && !can('manage-members', ws)) {
+      toast.error('Permission denied to modify workspace.');
+      return;
+    }
+
+    const membersChanged = wsDetails.members !== undefined && JSON.stringify(ws.members) !== JSON.stringify(wsDetails.members);
+    let actionKind: ChangeRecord['action'] = 'workspace-edit';
+    let summary = `Edited workspace ${ws.name}`;
+
+    if (membersChanged) {
+      if ((wsDetails.members?.length ?? 0) > ws.members.length) {
+        actionKind = 'member-add';
+        summary = `Added member to workspace ${ws.name}`;
+      } else {
+        actionKind = 'member-remove';
+        summary = `Removed member from workspace ${ws.name}`;
+      }
+    }
+
+    const changeId = pushChange(
+      actionKind,
+      'workspace',
+      id,
+      ws.name,
+      summary,
+      JSON.parse(JSON.stringify(ws))
+    );
+
+    setWorkspaces(prev => prev.map(w => w.id === id ? { ...w, ...wsDetails } : w));
+
+    toast.success(`Updated workspace "${ws.name}"`, {
+      action: {
+        label: 'Undo',
+        onClick: () => revertChange(changeId)
+      }
+    });
+  };
+
+  const deleteWorkspace = (id: string) => {
+    const ws = workspaces.find(w => w.id === id);
+    if (!ws) return;
+    if (!can('crud-workspace', ws)) {
+      toast.error('Permission denied to delete workspace.');
+      return;
+    }
+
+    const changeId = pushChange(
+      'workspace-delete',
+      'workspace',
+      id,
+      ws.name,
+      `Deleted workspace ${ws.name}`,
+      JSON.parse(JSON.stringify(ws))
+    );
+
+    setWorkspaces(prev => prev.filter(w => w.id !== id));
+
+    setServers(prev => prev.map(s => {
+      const globalVal = s.visibility?.global ?? false;
+      const workspaceIdsVal = s.visibility?.workspaceIds?.filter(wId => wId !== id) ?? [];
+      return {
+        ...s,
+        visibility: {
+          global: globalVal,
+          workspaceIds: workspaceIdsVal
+        }
+      };
+    }));
+    setAgents(prev => prev.map(a => {
+      const globalVal = a.visibility?.global ?? false;
+      const workspaceIdsVal = a.visibility?.workspaceIds?.filter(wId => wId !== id) ?? [];
+      return {
+        ...a,
+        visibility: {
+          global: globalVal,
+          workspaceIds: workspaceIdsVal
+        }
+      };
+    }));
+    setSkillsList(prev => prev.map(sk => {
+      const globalVal = sk.visibility?.global ?? false;
+      const workspaceIdsVal = sk.visibility?.workspaceIds?.filter(wId => wId !== id) ?? [];
+      return {
+        ...sk,
+        visibility: {
+          global: globalVal,
+          workspaceIds: workspaceIdsVal
+        }
+      };
+    }));
+    setPromptsList(prev => prev.map(p => {
+      const globalVal = p.visibility?.global ?? false;
+      const workspaceIdsVal = p.visibility?.workspaceIds?.filter(wId => wId !== id) ?? [];
+      return {
+        ...p,
+        visibility: {
+          global: globalVal,
+          workspaceIds: workspaceIdsVal
+        }
+      };
+    }));
+
+    toast.success(`Deleted workspace "${ws.name}"`, {
+      action: {
+        label: 'Undo',
+        onClick: () => revertChange(changeId)
+      }
+    });
+  };
+
+  const revertChange = (changeId: string) => {
+    const change = changeHistory.find(c => c.id === changeId);
+    if (!change) {
+      toast.error('Change record not found.');
+      return;
+    }
+
+    if (!can('revert', change)) {
+      toast.error('Permission denied to revert this change.');
+      return;
+    }
+
+    let revertAction: ChangeRecord['action'];
+    let revertSummary = `Reverted: ${change.summary}`;
+    let priorStateSnapshot: any = null;
+
+    if (change.action === 'workspace-create') {
+      revertAction = 'workspace-delete';
+      const ws = workspaces.find(w => w.id === change.targetId);
+      priorStateSnapshot = ws ? JSON.parse(JSON.stringify(ws)) : null;
+      setWorkspaces(prev => prev.filter(w => w.id !== change.targetId));
+    }
+    else if (change.action === 'workspace-delete') {
+      revertAction = 'workspace-create';
+      priorStateSnapshot = { id: change.targetId };
+      const restoredWs = change.snapshot;
+      setWorkspaces(prev => [...prev, restoredWs]);
+    }
+    else if (change.action === 'workspace-edit' || change.action === 'member-add' || change.action === 'member-remove') {
+      revertAction = change.action;
+      const ws = workspaces.find(w => w.id === change.targetId);
+      priorStateSnapshot = ws ? JSON.parse(JSON.stringify(ws)) : null;
+      setWorkspaces(prev => prev.map(w => w.id === change.targetId ? { ...w, ...change.snapshot } : w));
+    }
+    else if (change.action === 'delete') {
+      revertAction = 'delete';
+      priorStateSnapshot = {
+        item: change.snapshot.item,
+        bookmarks: bookmarks[change.targetKind] || []
+      };
+
+      const restoredItem = change.snapshot.item;
+      if (change.targetKind === 'server') {
+        setServers(prev => {
+          if (prev.some(s => s.id === change.targetId)) return prev;
+          return [...prev, restoredItem];
+        });
+      } else if (change.targetKind === 'agent') {
+        setAgents(prev => {
+          if (prev.some(a => a.id === change.targetId)) return prev;
+          return [...prev, restoredItem];
+        });
+      } else if (change.targetKind === 'skill') {
+        setSkillsList(prev => {
+          if (prev.some(s => s.id === change.targetId)) return prev;
+          return [...prev, restoredItem];
+        });
+      } else if (change.targetKind === 'prompt') {
+        setPromptsList(prev => {
+          if (prev.some(p => p.id === change.targetId)) return prev;
+          return [...prev, restoredItem];
+        });
+      }
+
+      if (change.snapshot.bookmarks.includes(change.targetId)) {
+        setBookmarks(prev => {
+          const list = prev[change.targetKind] || [];
+          if (list.includes(change.targetId)) return prev;
+          return {
+            ...prev,
+            [change.targetKind]: [...list, change.targetId]
+          };
+        });
+      }
+    }
+    else if (change.action === 'visibility') {
+      revertAction = 'visibility';
+      const item = getRawItem(change.targetKind as any, change.targetId);
+      priorStateSnapshot = item ? JSON.parse(JSON.stringify(item.visibility || { global: true, workspaceIds: [] })) : null;
+
+      const setVisibilityOnList = (listSetter: any) => {
+        listSetter((prev: any) => prev.map((it: any) => it.id === change.targetId ? { ...it, visibility: change.snapshot } : it));
+      };
+
+      if (change.targetKind === 'server') setVisibilityOnList(setServers);
+      else if (change.targetKind === 'agent') setVisibilityOnList(setAgents);
+      else if (change.targetKind === 'skill') setVisibilityOnList(setSkillsList);
+      else if (change.targetKind === 'prompt') setVisibilityOnList(setPromptsList);
+    }
+    else if (change.action === 'edit') {
+      revertAction = 'edit';
+      const currentItem = getRawItem(change.targetKind as any, change.targetId);
+      priorStateSnapshot = currentItem ? JSON.parse(JSON.stringify(currentItem)) : null;
+
+      if (change.targetKind === 'server') {
+        setServers(prev => prev.map(s => s.id === change.targetId ? { ...s, ...change.snapshot } : s));
+      } else if (change.targetKind === 'agent') {
+        setAgents(prev => prev.map(a => a.id === change.targetId ? { ...a, ...change.snapshot } : a));
+      } else if (change.targetKind === 'skill') {
+        setSkillsList(prev => prev.map(sk => sk.id === change.targetId ? { ...sk, ...change.snapshot } : sk));
+      } else if (change.targetKind === 'prompt') {
+        setPromptsList(prev => prev.map(p => p.id === change.targetId ? { ...p, ...change.snapshot } : p));
+      }
+    }
+    else if (change.action === 'disable' || change.action === 'enable') {
+      revertAction = change.action === 'disable' ? 'enable' : 'disable';
+      priorStateSnapshot = { priorDisabled: change.action === 'disable' };
+
+      const disabled = change.snapshot.priorDisabled;
+      if (change.targetKind === 'server') {
+        setServers(prev => prev.map(s => s.id === change.targetId ? { ...s, disabled } : s));
+      } else if (change.targetKind === 'agent') {
+        setAgents(prev => prev.map(a => a.id === change.targetId ? { ...a, disabled } : a));
+      } else if (change.targetKind === 'skill') {
+        setSkillsList(prev => prev.map(sk => sk.id === change.targetId ? { ...sk, disabled } : sk));
+      } else if (change.targetKind === 'prompt') {
+        setPromptsList(prev => prev.map(p => p.id === change.targetId ? { ...p, disabled } : p));
+      }
+    } else {
+      return;
+    }
+
+    if (currentUser) {
+      const newChangeId = `change-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const newRecord: ChangeRecord = {
+        id: newChangeId,
+        timestamp: new Date().toISOString(),
+        actor: currentUser.name,
+        actorRole: currentUser.role,
+        action: revertAction,
+        targetKind: change.targetKind,
+        targetId: change.targetId,
+        targetName: change.targetName,
+        summary: revertSummary,
+        snapshot: priorStateSnapshot
+      };
+      setChangeHistory(prev => [newRecord, ...prev].slice(0, 20));
+      
+      toast.success(`Reverted: ${change.summary}`, {
+        action: {
+          label: 'Undo',
+          onClick: () => revertChange(newChangeId)
+        }
+      });
+    }
+  };
+
   const deleteItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
+    const item = getRawItem(kind, id);
+    if (!item) return;
+    if (!can('delete', item)) {
+      toast.error('Permission denied to delete this asset.');
+      return;
+    }
+
+    const wsMemberships = item.visibility?.workspaceIds || [];
+
+    const snapshot = {
+      item: JSON.parse(JSON.stringify(item)),
+      bookmarks: bookmarks[kind] || [],
+      workspaces: wsMemberships
+    };
+
+    const changeId = pushChange(
+      'delete',
+      kind,
+      id,
+      item.name,
+      `Deleted ${item.name}`,
+      snapshot
+    );
+
     if (kind === 'server') {
       setServers(prev => prev.filter(s => s.id !== id));
     } else if (kind === 'agent') {
@@ -114,11 +568,6 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
       setPromptsList(prev => prev.filter(p => p.id !== id));
     }
 
-    setWorkspaces(prev => prev.map(ws => ({
-      ...ws,
-      items: ws.items.filter(item => !(item.kind === kind && item.id === id))
-    })));
-
     setBookmarks(prev => {
       const list = prev[kind] || [];
       return {
@@ -127,7 +576,12 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
       };
     });
 
-    setTransferRequests(prev => prev.filter(req => !(req.itemKind === kind && req.itemId === id)));
+    toast.success(`Deleted asset "${item.name}"`, {
+      action: {
+        label: 'Undo',
+        onClick: () => revertChange(changeId)
+      }
+    });
   };
 
   // Derive ownedByUser and ownerIsCurrentUser dynamically based on currentUser
@@ -171,42 +625,13 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
     }));
   };
 
-  const requestTransfer = (itemId: string, itemKind: 'server' | 'agent' | 'skill' | 'prompt', fromWorkspaceId: string, toWorkspaceId: string) => {
-    if (!currentUser) return;
-    const newReq: TransferRequest = {
-      id: `req-${Date.now()}`,
-      itemId,
-      itemKind,
-      fromWorkspaceId,
-      toWorkspaceId,
-      requestedBy: currentUser.name,
-      requestedAt: new Date().toISOString(),
-      status: 'pending'
-    };
-    setTransferRequests(prev => [...prev, newReq]);
-  };
 
-  const resolveTransfer = (requestId: string, status: 'approved' | 'declined') => {
-    setTransferRequests(prev => prev.map(req => req.id === requestId ? { ...req, status } : req));
-    const req = transferRequests.find(r => r.id === requestId);
-    if (status === 'approved' && req) {
-      setWorkspaces(prev => prev.map(ws => {
-        if (ws.id === req.toWorkspaceId) {
-          const alreadyExists = ws.items.some(item => item.id === req.itemId && item.kind === req.itemKind);
-          if (!alreadyExists) {
-            return {
-              ...ws,
-              items: [...ws.items, { kind: req.itemKind, id: req.itemId }]
-            };
-          }
-        }
-        return ws;
-      }));
-    }
-  };
 
   const approveItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
-    if (currentUser?.role !== 'super_admin') return;
+    if (!can('approve')) {
+      toast.error('Permission denied to approve.');
+      return;
+    }
     if (kind === 'server') {
       setServers(prev => prev.map(s => s.id === id ? { ...s, status: 'approved' } : s));
     } else if (kind === 'agent') {
@@ -219,7 +644,10 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const declineItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
-    if (currentUser?.role !== 'super_admin') return;
+    if (!can('approve')) {
+      toast.error('Permission denied to decline.');
+      return;
+    }
     if (kind === 'server') {
       setServers(prev => prev.map(s => s.id === id ? { ...s, status: 'rejected' } : s));
     } else if (kind === 'agent') {
@@ -234,7 +662,10 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
   const rejectItem = declineItem;
 
   const markInReview = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string) => {
-    if (currentUser?.role !== 'super_admin') return;
+    if (!can('approve')) {
+      toast.error('Permission denied.');
+      return;
+    }
     if (kind === 'server') {
       setServers(prev => prev.map(s => s.id === id ? { ...s, status: 'in_review' } : s));
     } else if (kind === 'agent') {
@@ -247,7 +678,22 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const setItemDisabled = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, disabled: boolean) => {
-    if (currentUser?.role !== 'super_admin') return;
+    const item = getRawItem(kind, id);
+    if (!item) return;
+    if (!can('toggle-disabled', item)) {
+      toast.error('Permission denied to change asset status.');
+      return;
+    }
+
+    const changeId = pushChange(
+      disabled ? 'disable' : 'enable',
+      kind,
+      id,
+      item.name,
+      `${disabled ? 'Disabled' : 'Enabled'} ${item.name}`,
+      { priorDisabled: !disabled }
+    );
+
     if (kind === 'server') {
       setServers(prev => prev.map(s => s.id === id ? { ...s, disabled } : s));
     } else if (kind === 'agent') {
@@ -257,10 +703,83 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
     } else if (kind === 'prompt') {
       setPromptsList(prev => prev.map(p => p.id === id ? { ...p, disabled } : p));
     }
+
+    if (disabled) {
+      toast.error(`"${item.name}" disabled — hidden from the catalog.`, {
+        action: {
+          label: 'Undo',
+          onClick: () => revertChange(changeId)
+        }
+      });
+    } else {
+      toast.success(`"${item.name}" enabled — restored to the catalog.`, {
+        action: {
+          label: 'Undo',
+          onClick: () => revertChange(changeId)
+        }
+      });
+    }
+  };
+
+  const setItemVisibility = (
+    kind: 'server' | 'agent' | 'skill' | 'prompt',
+    id: string,
+    visibility: { global: boolean; workspaceIds: string[] }
+  ) => {
+    const item = getRawItem(kind, id);
+    if (!item) return;
+    if (!can('set-visibility', item)) {
+      toast.error('Permission denied to change visibility.');
+      return;
+    }
+
+    const changeId = pushChange(
+      'visibility',
+      kind,
+      id,
+      item.name,
+      `Changed visibility of ${item.name}`,
+      JSON.parse(JSON.stringify(item.visibility || { global: true, workspaceIds: [] }))
+    );
+
+    const updateVisibility = (prev: any[]) =>
+      prev.map(it => (it.id === id ? { ...it, visibility } : it));
+
+    if (kind === 'server') {
+      setServers(prev => updateVisibility(prev));
+    } else if (kind === 'agent') {
+      setAgents(prev => updateVisibility(prev));
+    } else if (kind === 'skill') {
+      setSkillsList(prev => updateVisibility(prev));
+    } else if (kind === 'prompt') {
+      setPromptsList(prev => updateVisibility(prev));
+    }
+
+    toast.success(`Updated visibility settings for "${item.name}"`, {
+      action: {
+        label: 'Undo',
+        onClick: () => revertChange(changeId)
+      }
+    });
   };
 
   const updateItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', id: string, details: any) => {
-    if (currentUser?.role !== 'super_admin') return;
+    const item = getRawItem(kind, id);
+    if (!item) return;
+    if (!can('edit', item)) {
+      toast.error('Permission denied.');
+      return;
+    }
+
+    const changeId = pushChange(
+      'edit',
+      kind,
+      id,
+      item.name,
+      `Edited ${item.name} specifications`,
+      JSON.parse(JSON.stringify(item))
+    );
+
     if (kind === 'server') {
       setServers(prev => prev.map(s => s.id === id ? { ...s, ...details } : s));
     } else if (kind === 'agent') {
@@ -270,10 +789,20 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
     } else if (kind === 'prompt') {
       setPromptsList(prev => prev.map(p => p.id === id ? { ...p, ...details } : p));
     }
+
+    toast.success(`Saved changes for "${item.name}"`, {
+      action: {
+        label: 'Undo',
+        onClick: () => revertChange(changeId)
+      }
+    });
   };
 
   const registerItem = (kind: 'server' | 'agent' | 'skill' | 'prompt', details: any) => {
-    if (!currentUser) return;
+    if (!can('register')) {
+      toast.error('Super admins cannot register assets');
+      return;
+    }
     const id = details.id || `${kind}-${Date.now()}`;
     const isoDate = new Date().toISOString();
 
@@ -286,18 +815,20 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
       ]
     };
 
+    const initialVis = details.visibility || { global: false, workspaceIds: [] };
+
     if (kind === 'server') {
       const newServer: McpServer = {
         id,
         name: details.name,
         description: details.description || '',
-        publisher: currentUser.name,
+        publisher: currentUser!.name,
         version: details.version || '1.0.0',
         transport: details.transport || 'stdio',
         rating: 0.0,
         reviewsCount: 0,
         status: 'pending',
-        ownerName: currentUser.name,
+        ownerName: currentUser!.name,
         registeredAt: isoDate,
         updatedAt: isoDate,
         health: { uptimePct: 100, p95LatencyMs: 200, errorRatePct: 0.0, status: 'healthy' },
@@ -308,7 +839,8 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         prompts: details.prompts || [],
         skillIds: [],
         tags: details.tags || [],
-        trust: trustBlock
+        trust: trustBlock,
+        visibility: initialVis
       };
       setServers(prev => [...prev, newServer]);
     } else if (kind === 'agent') {
@@ -316,13 +848,13 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         id,
         name: details.name,
         description: details.description || '',
-        publisher: currentUser.name,
+        publisher: currentUser!.name,
         version: details.version || '1.0.0',
         endpoint: details.endpoint || '',
         rating: 0.0,
         reviewsCount: 0,
         status: 'pending',
-        ownerName: currentUser.name,
+        ownerName: currentUser!.name,
         registeredAt: isoDate,
         updatedAt: isoDate,
         successRatePct: 100,
@@ -333,7 +865,8 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         weeklySuccessRate: Array(12).fill(100),
         skillIds: details.skills || [],
         tags: details.tags || [],
-        trust: trustBlock
+        trust: trustBlock,
+        visibility: initialVis
       };
       setAgents(prev => [...prev, newAgent]);
     } else if (kind === 'skill') {
@@ -354,10 +887,11 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         stars: 0,
         downloads: 0,
         status: 'pending',
-        ownerName: currentUser.name,
+        ownerName: currentUser!.name,
         registeredAt: isoDate,
         iconName: details.iconName || 'shield',
-        trust: trustBlock
+        trust: trustBlock,
+        visibility: initialVis
       };
       setSkillsList(prev => [...prev, newSkill]);
     } else if (kind === 'prompt') {
@@ -366,7 +900,7 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         name: details.name,
         description: details.description || '',
         source: details.source || '',
-        author: currentUser.name,
+        author: currentUser!.name,
         createdAt: isoDate,
         lastUsedAt: isoDate,
         tags: details.tags || [],
@@ -375,26 +909,15 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         reviewsCount: 0,
         argCount: details.argCount || 0,
         status: 'pending',
-        ownerName: currentUser.name,
+        ownerName: currentUser!.name,
         iconName: details.iconName || 'scroll',
         trust: trustBlock,
         version: details.version || '1.0.0',
-        versions: details.versions || [{ version: details.version || '1.0.0', date: isoDate, notes: 'Initial registration.', content: details.content || '' }]
+        versions: details.versions || [{ version: details.version || '1.0.0', date: isoDate, notes: 'Initial registration.', content: details.content || '' }],
+        visibility: initialVis
       };
       setPromptsList(prev => [...prev, newPrompt]);
     }
-
-    // Append to personal workspace
-    const targetWsId = currentUser.role === 'super_admin' ? 'jordans-workspace' : 'alexs-workspace';
-    setWorkspaces(prev => prev.map(ws => {
-      if (ws.id === targetWsId) {
-        return {
-          ...ws,
-          items: [...ws.items, { kind, id }]
-        };
-      }
-      return ws;
-    }));
   };
 
   const getUsedBy = (skillId: string) => {
@@ -405,12 +928,6 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const getApprovals = () => {
-    const waitingOnYou = transferRequests.filter(req => {
-      if (req.status !== 'pending') return false;
-      const targetWs = derivedWorkspaces.find(w => w.id === req.toWorkspaceId);
-      return targetWs ? targetWs.ownerIsCurrentUser : false;
-    });
-
     const yourSubmissions: any[] = [];
     derivedServers.forEach(s => {
       if (s.ownedByUser && s.status !== 'approved') {
@@ -457,7 +974,7 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
       });
     }
 
-    return { waitingOnYou, yourSubmissions, registrationQueue };
+    return { yourSubmissions, registrationQueue };
   };
 
   const getAttentionItems = () => {
@@ -500,19 +1017,6 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
           timestamp: sk.trust.scannedAt
         });
       }
-    });
-
-    const { waitingOnYou } = getApprovals();
-    waitingOnYou.forEach(req => {
-      items.push({
-        kind: req.itemKind,
-        id: req.itemId,
-        name: `Transfer Request: ${req.itemId}`,
-        type: 'action',
-        detail: `Requested by ${req.requestedBy} from workspace`,
-        timestamp: req.requestedAt,
-        requestId: req.id
-      });
     });
 
     const nowTime = new Date('2026-07-08T16:59:08+05:30').getTime();
@@ -583,17 +1087,18 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
   const getPlatformStatus = () => {
     const unhealthyCount = derivedServers.filter(s => s.health.status !== 'healthy').length +
       derivedAgents.filter(a => a.successRatePct < 85).length;
-    const pendingTransfers = transferRequests.filter(r => r.status === 'pending').length;
+    const { registrationQueue } = getApprovals();
+    const pendingApprovals = registrationQueue.length;
 
     if (unhealthyCount > 0) {
       return {
         healthy: false,
-        message: `${unhealthyCount} system issues detected · ${pendingTransfers} transfers pending`
+        message: `${unhealthyCount} system issues detected · ${pendingApprovals} approvals pending`
       };
     }
     return {
       healthy: true,
-      message: `All systems healthy · ${pendingTransfers} approvals pending`
+      message: `All systems healthy · ${pendingApprovals} approvals pending`
     };
   };
 
@@ -624,13 +1129,10 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         skills: derivedSkills,
         prompts: derivedPrompts,
         workspaces: derivedWorkspaces,
-        transferRequests,
         bookmarks,
         userRatings,
         toggleBookmark,
         rateItem,
-        requestTransfer,
-        resolveTransfer,
         registerItem,
         approveItem,
         declineItem,
@@ -638,6 +1140,7 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         markInReview,
         updateItem,
         setItemDisabled,
+        setItemVisibility,
         getUsedBy,
         getApprovals,
         getAttentionItems,
@@ -649,7 +1152,13 @@ export const RegistryProvider: React.FC<{ children: ReactNode }> = ({ children }
         skillComments,
         promptComments,
         addComment,
-        deleteItem
+        deleteItem,
+        can,
+        changeHistory,
+        revertChange,
+        createWorkspace,
+        updateWorkspace,
+        deleteWorkspace
       }}
     >
       {children}

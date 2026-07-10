@@ -15,7 +15,7 @@ export const HomePage: React.FC = () => {
 
   // Platform statistics
   const totalAssets = mcpServers.length + a2aAgents.length + skills.length + (FEATURES.prompts ? prompts.length : 0);
-  const pendingApprovalsCount = approvals.waitingOnYou.length + approvals.yourSubmissions.length;
+  const pendingApprovalsCount = (approvals.registrationQueue?.length || 0) + approvals.yourSubmissions.length;
   
   // Calculate active issues
   const serverIssues = mcpServers.filter(s => s.health.status !== 'healthy').length;
@@ -75,12 +75,6 @@ export const HomePage: React.FC = () => {
             <span className="text-[12.5px] font-semibold text-muted-foreground">{platformStatus.message}</span>
           </div>
         </div>
-        <button
-          onClick={() => navigate('/catalog')}
-          className="bg-primary text-primary-foreground hover:bg-primary/95 text-xs font-semibold px-5 h-10 rounded-lg transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          Explore Catalog
-        </button>
       </div>
 
       {/* 2. Platform StatCards */}

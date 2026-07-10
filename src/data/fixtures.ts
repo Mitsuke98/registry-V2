@@ -1,4 +1,4 @@
-import type { McpServer, A2AAgent, SkillEntity, PromptEntity, Workspace, TransferRequest, PlatformActivityEntry } from './types';
+import type { McpServer, A2AAgent, SkillEntity, PromptEntity, Workspace, PlatformActivityEntry } from './types';
 
 export const currentUser = {
   name: 'Alex Vance',
@@ -1895,13 +1895,13 @@ Query Request: "Find all users registered since Jan 2026 who have placed more th
 export const platformActivity: PlatformActivityEntry[] = [
   { iconKind: 'approval', text: 'GitHub MCP server approved by Admin', timeAgo: '2h ago', route: '/servers/github-mcp' },
   { iconKind: 'version', text: 'Invoice Reconciler released version 1.2.0', timeAgo: '5h ago', route: '/agents/invoice-reconciler' },
-  { iconKind: 'transfer', text: 'Time-Series Anomaly Detector requested transfer to Design Systems', timeAgo: '1d ago', route: '/approvals' },
+  { iconKind: 'approval', text: 'Time-Series Anomaly Detector visibility updated', timeAgo: '1d ago', route: '/skills/anomaly-detection' },
   { iconKind: 'approval', text: 'Postgres MCP database gateway scanned & approved', timeAgo: '2d ago', route: '/servers/postgres-mcp' },
-  { iconKind: 'transfer', text: 'Structured PDF Extraction successfully transferred to Data Platform', timeAgo: '3d ago', route: '/skills/pdf-extraction' },
+  { iconKind: 'version', text: 'Structured PDF Extraction version 1.1.0 released', timeAgo: '3d ago', route: '/skills/pdf-extraction' },
   { iconKind: 'version', text: 'Brave Search MCP updated to version 1.1.0', timeAgo: '4d ago', route: '/servers/brave-search-mcp' },
   { iconKind: 'approval', text: 'Meeting Scheduler agent approved by Admin', timeAgo: '5d ago', route: '/agents/meeting-scheduler' },
   { iconKind: 'version', text: 'Prompt Injection Filter released version 1.2.0', timeAgo: '1w ago', route: '/skills/prompt-injection-filter' },
-  { iconKind: 'transfer', text: 'Docker Environment Audit transferred to Security Guild', timeAgo: '1w ago', route: '/skills/docker-sanity-check' },
+  { iconKind: 'approval', text: 'Docker Environment Audit scanned & approved', timeAgo: '1w ago', route: '/skills/docker-sanity-check' },
   { iconKind: 'approval', text: 'Research Analyst agent successfully registered', timeAgo: '2w ago', route: '/agents/research-analyst' }
 ];
 
@@ -1921,21 +1921,6 @@ export const workspaces: Workspace[] = [
     ownerName: 'Alex Vance',
     ownerIsCurrentUser: true,
     members: ['Alex Vance'],
-    items: [
-      { kind: 'server', id: 'github-mcp' },
-      { kind: 'server', id: 'postgres-mcp' },
-      { kind: 'server', id: 'filesystem-mcp' },
-      { kind: 'server', id: 'stripe-mcp' },
-      { kind: 'agent', id: 'invoice-reconciler' },
-      { kind: 'agent', id: 'research-analyst' },
-      { kind: 'agent', id: 'support-triage' },
-      { kind: 'agent', id: 'data-migrator' },
-      { kind: 'skill', id: 'prompt-injection-filter' },
-      { kind: 'skill', id: 'dependency-vulnerability-scanner' },
-      { kind: 'skill', id: 'docker-sanity-check' },
-      { kind: 'prompt', id: 'find-todo-comments' },
-      { kind: 'prompt', id: 'suggest-fix-for-issue' }
-    ],
     createdAt: '2026-06-01T00:00:00Z',
   },
   {
@@ -1946,9 +1931,6 @@ export const workspaces: Workspace[] = [
     ownerName: 'Jordan Blake',
     ownerIsCurrentUser: false,
     members: ['Jordan Blake'],
-    items: [
-      { kind: 'server', id: 'sentry-mcp' }
-    ],
     createdAt: '2026-06-01T00:00:00Z',
   },
   {
@@ -1959,10 +1941,6 @@ export const workspaces: Workspace[] = [
     ownerName: 'Alex Vance',
     ownerIsCurrentUser: true,
     members: ['Alex Vance', 'Priya N.', 'Alex K.', 'Marcus T.', 'Elena R.'],
-    items: [
-      { kind: 'skill', id: 'chart-builder' },
-      { kind: 'skill', id: 'meeting-summarizer' }
-    ],
     createdAt: '2026-05-15T00:00:00Z',
   },
   {
@@ -1973,13 +1951,6 @@ export const workspaces: Workspace[] = [
     ownerName: 'Priya N.',
     ownerIsCurrentUser: false,
     members: ['Priya N.', 'Alex Vance', 'Elena R.'],
-    items: [
-      { kind: 'server', id: 'postgres-mcp' },
-      { kind: 'skill', id: 'anomaly-detection' },
-      { kind: 'skill', id: 'sentiment-analyzer' },
-      { kind: 'skill', id: 'schema-migrator' },
-      { kind: 'skill', id: 'sql-query-guard' }
-    ],
     createdAt: '2026-05-10T00:00:00Z',
   },
   {
@@ -1990,34 +1961,6 @@ export const workspaces: Workspace[] = [
     ownerName: 'Marcus T.',
     ownerIsCurrentUser: false,
     members: ['Marcus T.', 'Alex Vance', 'Alex K.'],
-    items: [
-      { kind: 'skill', id: 'prompt-injection-filter' },
-      { kind: 'skill', id: 'dependency-vulnerability-scanner' },
-      { kind: 'skill', id: 'docker-sanity-check' }
-    ],
     createdAt: '2026-05-01T00:00:00Z',
-  }
-];
-
-export const transferRequests: TransferRequest[] = [
-  {
-    id: 'req-1',
-    itemKind: 'skill',
-    itemId: 'pdf-extraction',
-    fromWorkspaceId: 'data-platform-team',
-    toWorkspaceId: 'design-systems-team',
-    requestedBy: 'Priya N.',
-    requestedAt: '2026-07-05T10:00:00Z',
-    status: 'pending',
-  },
-  {
-    id: 'req-2',
-    itemKind: 'prompt',
-    itemId: 'write-sql-query',
-    fromWorkspaceId: 'data-platform-team',
-    toWorkspaceId: 'design-systems-team',
-    requestedBy: 'Marcus T.',
-    requestedAt: '2026-07-06T12:00:00Z',
-    status: 'pending',
   }
 ];

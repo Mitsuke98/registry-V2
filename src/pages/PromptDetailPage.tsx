@@ -11,9 +11,10 @@ import { DetailTabs } from '@/components/registry/DetailTabs';
 import { SmartTable } from '@/components/registry/SmartTable';
 import { VersionsTable } from '@/components/registry/VersionsTable';
 import { CompareDialog } from '@/components/registry/CompareDialog';
-import { copyText, VerifiedBadge, ScanGrade, StatusBadge, RatingStars, RatePopover, BookmarkToggle, EmptyState } from '@/components/registry/UIHelperKit';
-import { Copy, Trash2, Send } from 'lucide-react';
+import { copyText, VerifiedBadge, ScanGrade, StatusBadge, RatingStars, RatePopover, BookmarkToggle, EmptyState, VisibilityPopover } from '@/components/registry/UIHelperKit';
+import { Copy, Trash2, Send, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { EditAssetDialog } from '@/components/registry/EditAssetDialog';
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,7 @@ export const PromptDetailPage: React.FC = () => {
   }
 
   const { id } = useParams<{ id: string }>();
-  const { prompts, currentUser, deleteItem, promptComments, addComment } = useRegistry();
+  const { prompts, currentUser, deleteItem, promptComments, addComment, can, updateItem, setItemDisabled } = useRegistry();
   const detailTabContext = useDetailTab();
 
   const [activeTab, setActiveTabLocal] = useState('overview');
@@ -37,6 +38,7 @@ export const PromptDetailPage: React.FC = () => {
   const [compareOpen, setCompareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [isEditOpen, setIsEditOpen] = useState(false);
 
   const prompt = prompts.find((p) => p.id === id);
 
@@ -145,6 +147,11 @@ export const PromptDetailPage: React.FC = () => {
         badgeCluster={
           <>
             <StatusBadge status={prompt.status} />
+            {prompt.disabled && (
+              <span className="text-[10px] font-bold border border-red-500/20 bg-red-500/5 text-red-600 px-1.5 py-0.5 rounded uppercase leading-none">
+                Disabled
+              </span>
+            )}
             {prompt.trust?.verified && <VerifiedBadge />}
             {prompt.trust && <ScanGrade score={prompt.trust.score} />}
           </>
@@ -164,6 +171,37 @@ export const PromptDetailPage: React.FC = () => {
           <>
             <BookmarkToggle kind="prompt" id={prompt.id} />
             <RatePopover kind="prompt" id={prompt.id} />
+            <VisibilityPopover kind="prompt" id={prompt.id} />
+
+            {can('edit', prompt) && (
+              <Button variant="outline" onClick={() => setIsEditOpen(true)} className="h-9 text-xs font-semibold gap-1.5 cursor-pointer">
+                <Edit className="size-3.5" />
+                <span>Edit</span>
+              </Button>
+            )}
+
+            {can('delete', prompt) && (
+              <Button variant="destructive" onClick={() => setDeleteOpen(true)} className="h-9 text-xs font-semibold gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer">
+                <Trash2 className="size-3.5" />
+                <span>Delete</span>
+              </Button>
+            )}
+
+            {can('toggle-disabled', prompt) && (
+              <div className="flex items-center gap-2 border border-border rounded-lg px-3 h-9 bg-background select-none">
+                <span className="text-xs text-muted-foreground font-semibold">Enabled</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!prompt.disabled}
+                    onChange={() => setItemDisabled('prompt', prompt.id, !prompt.disabled)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4 bg-muted/80 rounded-full peer peer-focus:ring-1 peer-focus:ring-primary/20 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary relative"></div>
+                </label>
+              </div>
+            )}
+
             <button
               onClick={handleCopyPrompt}
               className="h-9 px-4 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/95 rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
@@ -171,15 +209,6 @@ export const PromptDetailPage: React.FC = () => {
               <Copy className="size-4" />
               <span>Copy Prompt</span>
             </button>
-            {currentUser?.role === 'super_admin' && (
-              <button
-                onClick={() => setDeleteOpen(true)}
-                className="h-9 px-3 rounded-lg border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-600 inline-flex items-center gap-1.5 cursor-pointer text-xs font-semibold"
-              >
-                <Trash2 className="size-4" />
-                <span>Delete</span>
-              </button>
-            )}
           </>
         }
       />
@@ -441,6 +470,16 @@ export const PromptDetailPage: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+      {/* EDIT DIALOG */}
+      <EditAssetDialog
+        isOpen={isEditOpen}
+        onOpenChange={setIsEditOpen}
+        kind="prompt"
+        item={prompt}
+        onSave={updates => {
+          updateItem('prompt', prompt.id, updates);
+        }}
+      />
     </div>
   );
 };

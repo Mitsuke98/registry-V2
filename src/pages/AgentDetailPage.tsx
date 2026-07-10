@@ -14,10 +14,12 @@ import { SubTabs } from '@/components/registry/SubTabs';
 import { SmartTable } from '@/components/registry/SmartTable';
 import { EnableToggle, TestButton } from '@/components/registry/TestDialogs';
 import { VersionsTable } from '@/components/registry/VersionsTable';
-import { VerifiedBadge, ScanGrade, StatusBadge, RatingStars, RatePopover, BookmarkToggle, CopyBlock, EmptyState } from '@/components/registry/UIHelperKit';
+import { VerifiedBadge, ScanGrade, StatusBadge, RatingStars, RatePopover, BookmarkToggle, CopyBlock, EmptyState, VisibilityPopover } from '@/components/registry/UIHelperKit';
 import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TableRow, TableCell } from '@/components/ui/table';
+import { EditAssetDialog } from '@/components/registry/EditAssetDialog';
+import { Edit, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -29,12 +31,16 @@ import {
 export const AgentDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { a2aAgents, skills } = useRegistry();
+  const { a2aAgents, skills, can, updateItem, deleteItem, setItemDisabled } = useRegistry();
   const detailTabContext = useDetailTab();
 
   const activeTab = searchParams.get('tab') || 'overview';
   const [overviewSubTab, setOverviewSubTab] = useState<'info' | 'connection' | 'registry'>('info');
   const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
+
+  // Edit / Delete states
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   // Integration states
   const [integrationLang, setIntegrationLang] = useState<'ts' | 'python'>('ts');
@@ -216,6 +222,11 @@ asyncio.run(main())`;
         badgeCluster={
           <>
             <StatusBadge status={agent.status} />
+            {agent.disabled && (
+              <span className="text-[10px] font-bold border border-red-500/20 bg-red-500/5 text-red-600 px-1.5 py-0.5 rounded uppercase leading-none">
+                Disabled
+              </span>
+            )}
             {agent.trust.verified && <VerifiedBadge />}
             <ScanGrade score={agent.trust.score} />
           </>
@@ -235,6 +246,37 @@ asyncio.run(main())`;
           <>
             <BookmarkToggle kind="agent" id={agent.id} />
             <RatePopover kind="agent" id={agent.id} />
+            <VisibilityPopover kind="agent" id={agent.id} />
+
+            {can('edit', agent) && (
+              <Button variant="outline" onClick={() => setIsEditOpen(true)} className="h-9 text-xs font-semibold gap-1.5 cursor-pointer">
+                <Edit className="size-3.5" />
+                <span>Edit</span>
+              </Button>
+            )}
+
+            {can('delete', agent) && (
+              <Button variant="destructive" onClick={() => setIsDeleteOpen(true)} className="h-9 text-xs font-semibold gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer">
+                <Trash2 className="size-3.5" />
+                <span>Delete</span>
+              </Button>
+            )}
+
+            {can('toggle-disabled', agent) && (
+              <div className="flex items-center gap-2 border border-border rounded-lg px-3 h-9 bg-background select-none">
+                <span className="text-xs text-muted-foreground font-semibold">Enabled</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!agent.disabled}
+                    onChange={() => setItemDisabled('agent', agent.id, !agent.disabled)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4 bg-muted/80 rounded-full peer peer-focus:ring-1 peer-focus:ring-primary/20 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary relative"></div>
+                </label>
+              </div>
+            )}
+
             <Button
               onClick={() => toast.success(`Simulating calling agent ${agent.name}...`)}
               className="h-9 px-4 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/95 rounded-lg border border-transparent shadow-sm cursor-pointer"
@@ -835,6 +877,41 @@ asyncio.run(main())`;
           </DialogContent>
         </Dialog>
       )}
+      {/* EDIT DIALOG */}
+      <EditAssetDialog
+        isOpen={isEditOpen}
+        onOpenChange={setIsEditOpen}
+        kind="agent"
+        item={agent}
+        onSave={updates => {
+          updateItem('agent', agent.id, updates);
+        }}
+      />
+
+      {/* DELETE CONFIRM DIALOG */}
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent className="sm:max-w-[420px] p-6 bg-card border border-border rounded-xl select-none">
+          <DialogHeader className="mb-4">
+            <DialogTitle className="text-base font-bold text-foreground">Delete Asset</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Are you sure you want to delete asset "{agent.name}"? This action is reversible.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-end gap-2 pt-4">
+            <Button variant="outline" onClick={() => setIsDeleteOpen(false)} className="h-9 text-xs font-semibold rounded-lg">
+              Cancel
+            </Button>
+            <Button onClick={() => {
+              deleteItem('agent', agent.id);
+              setIsDeleteOpen(false);
+              window.history.back();
+            }} className="h-9 px-5 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-sm">
+              Confirm Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

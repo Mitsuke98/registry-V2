@@ -10,6 +10,7 @@ import { Check, X, Clock, RefreshCw, Eye, Edit3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { EditAssetDialog } from '@/components/registry/EditAssetDialog';
 import {
   Dialog,
   DialogContent,
@@ -27,15 +28,16 @@ export const ApprovalsPage: React.FC = () => {
     a2aAgents,
     skills,
     prompts,
-    workspaces,
     currentUser,
-    resolveTransfer,
     getApprovals,
     approveItem,
     rejectItem,
     markInReview,
     updateItem,
-    setItemDisabled
+    setItemDisabled,
+    can,
+    changeHistory,
+    revertChange
   } = useRegistry();
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
@@ -55,31 +57,10 @@ export const ApprovalsPage: React.FC = () => {
   const [detailItem, setDetailItem] = useState<{ kind: AssetKind; item: any } | null>(null);
   const [editItem, setEditItem] = useState<{ kind: AssetKind; item: any } | null>(null);
 
-  // Edit form states
-  const [editName, setEditName] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editVersion, setEditVersion] = useState('');
-  const [editEndpoint, setEditEndpoint] = useState('');
-  const [editTransport, setEditTransport] = useState<'stdio' | 'sse' | 'http'>('stdio');
-  const [editCategory, setEditCategory] = useState('');
-  const [editTagsString, setEditTagsString] = useState('');
-
   // Read end user data
-  const { waitingOnYou, yourSubmissions } = getApprovals();
+  const { yourSubmissions } = getApprovals();
 
-  const getWorkspaceName = (id: string) => {
-    return workspaces.find(w => w.id === id)?.name || id;
-  };
 
-  const handleApproveTransfer = (requestId: string) => {
-    resolveTransfer(requestId, 'approved');
-    toast.success('Transfer request approved!');
-  };
-
-  const handleDeclineTransfer = (requestId: string) => {
-    resolveTransfer(requestId, 'declined');
-    toast.error('Transfer request declined.');
-  };
 
   // Status-dependent filtering helpers
   const getRawItemsOfKind = (kind: AssetKind) => {
@@ -167,38 +148,8 @@ export const ApprovalsPage: React.FC = () => {
   // Edit view trigger
   const handleOpenEdit = (item: any) => {
     setEditItem({ kind: activeKind, item });
-    setEditName(item.name || '');
-    setEditDescription(item.description || '');
-    setEditVersion(item.version || '1.0.0');
-    setEditEndpoint(item.endpoint || '');
-    setEditTransport(item.transport || 'stdio');
-    setEditCategory(item.category || '');
-    setEditTagsString((item.tags || []).join(', '));
   };
 
-  // Submit edits
-  const handleSaveEdit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editItem) return;
-    const tagsArray = editTagsString.split(',').map(t => t.trim()).filter(Boolean);
-    const updates: any = {
-      name: editName,
-      description: editDescription,
-      version: editVersion,
-      tags: tagsArray
-    };
-    if (editItem.kind === 'server') {
-      updates.transport = editTransport;
-    } else if (editItem.kind === 'agent') {
-      updates.endpoint = editEndpoint;
-    } else if (editItem.kind === 'skill') {
-      updates.category = editCategory;
-    }
-
-    updateItem(editItem.kind, editItem.item.id, updates);
-    toast.success('Changes saved successfully!');
-    setEditItem(null);
-  };
 
   // Action status updaters
   const handleStatusChange = (kind: AssetKind, id: string, name: string, nextStatus: 'approved' | 'rejected' | 'in_review') => {
@@ -255,52 +206,7 @@ export const ApprovalsPage: React.FC = () => {
     }
   ];
 
-  // Transfer request columns
-  const transferColumns = [
-    {
-      header: 'Item',
-      accessor: (row: any) => (
-        <div className="flex items-center gap-2">
-          <EntityIcon kind={row.itemKind} className="size-4" />
-          <span className="font-semibold text-foreground">{row.itemId}</span>
-          <span className="text-[10px] text-muted-foreground uppercase bg-muted px-1.5 py-0.5 rounded font-mono font-bold select-none">{row.itemKind}</span>
-        </div>
-      )
-    },
-    {
-      header: 'From Workspace',
-      accessor: (row: any) => <span>{getWorkspaceName(row.fromWorkspaceId)}</span>
-    },
-    {
-      header: 'To Workspace',
-      accessor: (row: any) => <span>{getWorkspaceName(row.toWorkspaceId)}</span>
-    },
-    {
-      header: 'Requested By',
-      accessor: (row: any) => <span className="font-mono text-muted-foreground">{row.requestedBy}</span>
-    },
-    {
-      header: 'Actions',
-      accessor: (row: any) => (
-        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-          <button
-            onClick={() => handleApproveTransfer(row.id)}
-            className="flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-semibold px-2.5 py-1 rounded cursor-pointer transition-colors"
-          >
-            <Check className="size-3 text-emerald-600" />
-            <span>Approve</span>
-          </button>
-          <button
-            onClick={() => handleDeclineTransfer(row.id)}
-            className="flex items-center gap-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 text-[11px] font-semibold px-2.5 py-1 rounded cursor-pointer transition-colors"
-          >
-            <X className="size-3 text-red-600" />
-            <span>Decline</span>
-          </button>
-        </div>
-      )
-    }
-  ];
+
 
   return (
     <div className="space-y-6">
@@ -546,18 +452,80 @@ export const ApprovalsPage: React.FC = () => {
             className={filteredItems.length === 0 ? 'pointer-events-none opacity-80' : ''}
           />
 
-          {/* Transfers list below */}
-          <div className="space-y-4 pt-4 select-none">
+
+
+          {/* Change History Audit section */}
+          <div className="space-y-4 pt-6 border-t border-border mt-6 select-none">
             <div className="flex items-baseline gap-2">
-              <h2 className="text-[15px] font-bold text-foreground">Workspace Transfers (Jordan)</h2>
-              <span className="text-xs text-muted-foreground font-mono">({waitingOnYou.length})</span>
+              <h2 className="text-[15px] font-bold text-foreground">Change History</h2>
+              <span className="text-xs text-muted-foreground font-mono">({changeHistory.length})</span>
             </div>
-            {waitingOnYou.length === 0 ? (
+            {changeHistory.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted-foreground border border-dashed border-border rounded-xl bg-card">
-                No transfer requests require your attention.
+                No changes recorded yet.
               </div>
             ) : (
-              <DataTable columns={transferColumns} data={waitingOnYou} />
+              <SmartTable
+                columns={[
+                  {
+                    key: 'timestamp',
+                    header: 'Timestamp',
+                    render: (row) => <span>{new Date(row.timestamp).toLocaleString()}</span>
+                  },
+                  {
+                    key: 'actor',
+                    header: 'Actor',
+                    render: (row) => (
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-foreground">{row.actor}</span>
+                        <span className="text-[10px] text-muted-foreground uppercase bg-muted px-1.5 py-0.5 rounded font-mono font-bold">{row.actorRole}</span>
+                      </div>
+                    )
+                  },
+                  {
+                    key: 'action',
+                    header: 'Action',
+                    render: (row) => (
+                      <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                        row.action.startsWith('workspace')
+                          ? 'bg-blue-100 text-blue-800'
+                          : row.action === 'delete'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {row.action}
+                      </span>
+                    )
+                  },
+                  {
+                    key: 'targetName',
+                    header: 'Target Name',
+                    render: (row) => <span className="font-mono text-xs font-semibold text-foreground">{row.targetName}</span>
+                  },
+                  {
+                    key: 'summary',
+                    header: 'Summary',
+                    render: (row) => <span className="text-xs text-muted-foreground">{row.summary}</span>
+                  },
+                  {
+                    key: 'revert',
+                    header: 'Revert',
+                    className: 'text-right pr-4',
+                    render: (row) => (
+                      can('revert', row) && (
+                        <Button
+                          onClick={() => revertChange(row.id)}
+                          variant="outline"
+                          className="h-8 text-xs font-semibold cursor-pointer"
+                        >
+                          Revert
+                        </Button>
+                      )
+                    )
+                  }
+                ]}
+                rows={changeHistory}
+              />
             )}
           </div>
         </div>
@@ -566,19 +534,7 @@ export const ApprovalsPage: React.FC = () => {
         // END USER VIEW
         // ---------------------------------------------------------------------
         <div className="space-y-6">
-          <div className="space-y-4">
-            <div className="flex items-baseline gap-2 select-none">
-              <h2 className="text-[15px] font-bold text-foreground">Waiting on Your Approval</h2>
-              <span className="text-xs text-muted-foreground font-mono">({waitingOnYou.length})</span>
-            </div>
-            {waitingOnYou.length === 0 ? (
-              <div className="py-8 text-center text-xs text-muted-foreground border border-dashed border-border rounded-xl bg-card select-none">
-                No transfer requests require your attention.
-              </div>
-            ) : (
-              <DataTable columns={transferColumns} data={waitingOnYou} />
-            )}
-          </div>
+
 
           <div className="space-y-4">
             <div className="flex items-baseline gap-2 select-none">
@@ -766,110 +722,19 @@ export const ApprovalsPage: React.FC = () => {
           </DialogContent>
         </Dialog>
       )}
-
-      {/* ---------------------------------------------------------------------
-          SUPER ADMIN EDIT DIALOG
-          --------------------------------------------------------------------- */}
-      {editItem && (
-        <Dialog open={!!editItem} onOpenChange={val => { if(!val) setEditItem(null); }}>
-          <DialogContent className="sm:max-w-[540px] max-h-[85vh] overflow-y-auto p-6 bg-card border border-border rounded-xl">
-            <DialogHeader className="mb-4 select-none">
-              <DialogTitle className="text-base font-bold text-foreground">Edit Asset Details</DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Edit core properties for "{editItem.item.name}".
-              </DialogDescription>
-            </DialogHeader>
-
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              {/* Basic Info */}
-              <div className="space-y-3">
-                <h4 className="text-[11px] font-bold uppercase tracking-wider text-foreground select-none border-b pb-1">Basic Info</h4>
-                <div className="space-y-1">
-                  <label className="text-[11px] text-muted-foreground font-semibold select-none">Name</label>
-                  <Input value={editName} onChange={e => setEditName(e.target.value)} required className="h-9 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] text-muted-foreground font-semibold select-none">Description</label>
-                  <textarea
-                    value={editDescription}
-                    onChange={e => setEditDescription(e.target.value)}
-                    rows={2}
-                    required
-                    className="w-full rounded-lg border border-border bg-transparent p-2 text-xs focus:outline-none focus:border-primary/50 text-foreground"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-muted-foreground font-semibold select-none">Version</label>
-                    <Input value={editVersion} onChange={e => setEditVersion(e.target.value)} required className="h-9 text-xs font-mono" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-muted-foreground font-semibold select-none">Tags (comma-separated)</label>
-                    <Input value={editTagsString} onChange={e => setEditTagsString(e.target.value)} className="h-9 text-xs" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Publisher & Tech Config */}
-              <div className="space-y-3 pt-2">
-                <h4 className="text-[11px] font-bold uppercase tracking-wider text-foreground select-none border-b pb-1">Technical details</h4>
-                {editItem.kind === 'server' ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[11px] text-muted-foreground font-semibold select-none">Transport</label>
-                      <select
-                        value={editTransport}
-                        onChange={e => setEditTransport(e.target.value as any)}
-                        className="w-full h-9 px-3 rounded-lg border border-border bg-background text-xs font-semibold cursor-pointer focus:outline-none"
-                      >
-                        <option value="stdio">STDIO</option>
-                        <option value="sse">SSE</option>
-                        <option value="http">HTTP</option>
-                      </select>
-                    </div>
-                  </div>
-                ) : editItem.kind === 'agent' ? (
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-muted-foreground font-semibold select-none">Endpoint Endpoint URI</label>
-                    <Input value={editEndpoint} onChange={e => setEditEndpoint(e.target.value)} required className="h-9 text-xs font-mono" />
-                  </div>
-                ) : editItem.kind === 'skill' ? (
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-muted-foreground font-semibold select-none">Category</label>
-                    <Input value={editCategory} onChange={e => setEditCategory(e.target.value)} required className="h-9 text-xs" />
-                  </div>
-                ) : null}
-              </div>
-
-              {/* Readonly capabilities */}
-              <div className="p-3.5 border border-dashed rounded-lg bg-muted/15 space-y-1 select-none">
-                <div className="text-[11px] font-bold text-foreground">Capabilities</div>
-                <div className="text-[10px] text-muted-foreground italic">
-                  Capabilities can only be set during registration.
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-2 pt-4 select-none">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setEditItem(null)}
-                  className="h-9 px-4 text-xs font-semibold rounded-lg"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  className="h-9 px-5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/95 shadow-sm"
-                >
-                  Save Changes
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
+      <EditAssetDialog
+        isOpen={!!editItem}
+        onOpenChange={val => { if (!val) setEditItem(null); }}
+        kind={editItem?.kind || 'server'}
+        item={editItem?.item}
+        onSave={updates => {
+          if (editItem) {
+            updateItem(editItem.kind, editItem.item.id, updates);
+            toast.success('Changes saved successfully!');
+            setEditItem(null);
+          }
+        }}
+      />
     </div>
   );
 };

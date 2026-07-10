@@ -44,7 +44,7 @@ export const CatalogPage: React.FC = () => {
   // KPI calculations based on current facet
   const getKPIs = () => {
     if (facet === 'servers') {
-      const active = mcpServers.filter(s => s.status === 'approved');
+      const active = mcpServers.filter(s => s.status === 'approved' && !s.disabled && s.visibility?.global);
       const avgUptime = active.reduce((acc, s) => acc + s.health.uptimePct, 0) / (active.length || 1);
       const calls = active.reduce((acc, s) => acc + s.weeklyCalls.reduce((sum, c) => sum + c, 0), 0);
       return [
@@ -55,7 +55,7 @@ export const CatalogPage: React.FC = () => {
       ];
     }
     if (facet === 'agents') {
-      const active = a2aAgents.filter(a => a.status === 'approved');
+      const active = a2aAgents.filter(a => a.status === 'approved' && !a.disabled && a.visibility?.global);
       const avgSuccess = active.reduce((acc, a) => acc + a.successRatePct, 0) / (active.length || 1);
       const calls = active.reduce((acc, a) => acc + a.weeklyCalls.reduce((sum, c) => sum + c, 0), 0);
       return [
@@ -66,7 +66,7 @@ export const CatalogPage: React.FC = () => {
       ];
     }
     if (facet === 'skills') {
-      const active = skills.filter(s => s.status === 'approved');
+      const active = skills.filter(s => s.status === 'approved' && !s.disabled && s.visibility?.global);
       const totalDownloads = active.reduce((acc, s) => acc + s.downloads, 0);
       const categoriesCount = new Set(active.map(s => s.category)).size;
       return [
@@ -77,7 +77,7 @@ export const CatalogPage: React.FC = () => {
       ];
     }
     if (facet === 'prompts') {
-      const active = prompts.filter(p => p.status === 'approved');
+      const active = prompts.filter(p => p.status === 'approved' && !p.disabled && p.visibility?.global);
       const sourcesCount = new Set(active.map(p => p.source)).size;
       return [
         { value: active.length, label: 'Available Prompts' },
@@ -87,10 +87,10 @@ export const CatalogPage: React.FC = () => {
       ];
     }
     // Default 'all'
-    const activeAssets = mcpServers.filter(s => s.status === 'approved').length +
-      a2aAgents.filter(a => a.status === 'approved').length +
-      skills.filter(s => s.status === 'approved').length +
-      (FEATURES.prompts ? prompts.filter(p => p.status === 'approved').length : 0);
+    const activeAssets = mcpServers.filter(s => s.status === 'approved' && !s.disabled && s.visibility?.global).length +
+      a2aAgents.filter(a => a.status === 'approved' && !a.disabled && a.visibility?.global).length +
+      skills.filter(s => s.status === 'approved' && !s.disabled && s.visibility?.global).length +
+      (FEATURES.prompts ? prompts.filter(p => p.status === 'approved' && !p.disabled && p.visibility?.global).length : 0);
     return [
       { value: activeAssets, label: 'Total Assets' },
       { value: '88%', label: 'Verified %' },
@@ -99,11 +99,11 @@ export const CatalogPage: React.FC = () => {
     ];
   };
 
-  // Approved only lists
-  const approvedServers = mcpServers.filter(s => s.status === 'approved' && !s.disabled);
-  const approvedAgents = a2aAgents.filter(a => a.status === 'approved' && !a.disabled);
-  const approvedSkills = skills.filter(s => s.status === 'approved' && !s.disabled);
-  const approvedPrompts = FEATURES.prompts ? prompts.filter(p => p.status === 'approved' && !p.disabled) : [];
+  // Approved, enabled, and globally visible lists for the Catalog
+  const approvedServers = mcpServers.filter(s => s.status === 'approved' && !s.disabled && s.visibility?.global);
+  const approvedAgents = a2aAgents.filter(a => a.status === 'approved' && !a.disabled && a.visibility?.global);
+  const approvedSkills = skills.filter(s => s.status === 'approved' && !s.disabled && s.visibility?.global);
+  const approvedPrompts = FEATURES.prompts ? prompts.filter(p => p.status === 'approved' && !p.disabled && p.visibility?.global) : [];
 
   // Bookmark count for current facet
   const getBookmarksCount = () => {

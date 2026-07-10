@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useRegistry } from '@/data/RegistryContext';
-import { BadgeCheck, Star, Shield, Bot, Scroll, Activity, AlertTriangle, Bookmark } from 'lucide-react';
+import { BadgeCheck, Star, Shield, Bot, Scroll, Activity, AlertTriangle, Bookmark, Eye } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from 'sonner';
 
@@ -235,5 +235,124 @@ export const SegmentedStatPill: React.FC<{ left: string; right: string }> = ({ l
       <span className="px-2.5 py-0.5 border-r border-border">{left}</span>
       <span className="px-2.5 py-0.5 text-muted-foreground">{right}</span>
     </span>
+  );
+};
+
+// VisibilityPopover component
+export const VisibilityPopover: React.FC<{ kind: 'server' | 'agent' | 'skill' | 'prompt'; id: string }> = ({ kind, id }) => {
+  const { mcpServers, a2aAgents, skills, prompts, workspaces, currentUser, setItemVisibility, can } = useRegistry();
+
+  const item = React.useMemo(() => {
+    if (kind === 'server') return mcpServers.find(s => s.id === id);
+    if (kind === 'agent') return a2aAgents.find(a => a.id === id);
+    if (kind === 'skill') return skills.find(s => s.id === id);
+    return prompts.find(p => p.id === id);
+  }, [kind, id, mcpServers, a2aAgents, skills, prompts]);
+
+  if (!item || !can('set-visibility', item)) return null;
+
+  const [global, setGlobal] = React.useState(false);
+  const [workspaceIds, setWorkspaceIds] = React.useState<string[]>([]);
+  const [popoverOpen, setPopoverOpen] = React.useState(false);
+
+  // Sync state when popover opens or item changes
+  React.useEffect(() => {
+    if (item?.visibility) {
+      setGlobal(item.visibility.global ?? false);
+      setWorkspaceIds(item.visibility.workspaceIds ?? []);
+    }
+  }, [item, popoverOpen]);
+
+  const selectableWorkspaces = React.useMemo(() => {
+    if (!currentUser) return [];
+    const teams = workspaces.filter(w => w.kind === 'team');
+    if (currentUser.role === 'super_admin') return teams;
+    return teams.filter(w => w.members.includes(currentUser.name));
+  }, [workspaces, currentUser]);
+
+  const handleApply = () => {
+    setItemVisibility(kind, id, { global, workspaceIds });
+    setPopoverOpen(false);
+  };
+
+  const getVisibilityLabel = () => {
+    const isGlobal = item.visibility?.global;
+    const wsCount = item.visibility?.workspaceIds?.length || 0;
+
+    if (isGlobal && wsCount > 0) return `Public + ${wsCount} workspaces`;
+    if (isGlobal) return 'Public';
+    if (wsCount > 0) return `${wsCount} workspaces`;
+    return 'Private';
+  };
+
+  const label = getVisibilityLabel();
+
+  return (
+    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+      <PopoverTrigger asChild>
+        <button className="h-9 px-3 rounded-lg border border-border bg-background hover:bg-accent/60 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer text-foreground">
+          <Eye className="size-3.5 text-muted-foreground" />
+          <span>Visibility: {label}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3 bg-popover border border-border shadow-md rounded-lg text-popover-foreground space-y-3">
+        <div className="text-xs font-bold select-none border-b pb-1">Visibility Settings</div>
+
+        <div className="flex items-center justify-between p-1.5 rounded-lg border bg-muted/10">
+          <div className="flex flex-col select-none">
+            <span className="text-[11px] font-semibold text-foreground">Public Catalog</span>
+            <span className="text-[9.5px] text-muted-foreground">List globally in catalog</span>
+          </div>
+          <input
+            type="checkbox"
+            checked={global}
+            onChange={e => setGlobal(e.target.checked)}
+            className="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+          />
+        </div>
+
+        {selectableWorkspaces.length > 0 && (
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground font-semibold select-none">Share into team workspaces</label>
+            <div className="max-h-28 overflow-y-auto border rounded p-1.5 space-y-1 bg-background">
+              {selectableWorkspaces.map(ws => (
+                <label key={ws.id} className="flex items-center gap-2 text-xs text-foreground cursor-pointer hover:bg-accent/40 p-0.5 rounded">
+                  <input
+                    type="checkbox"
+                    checked={workspaceIds.includes(ws.id)}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setWorkspaceIds([...workspaceIds, ws.id]);
+                      } else {
+                        setWorkspaceIds(workspaceIds.filter(wId => wId !== ws.id));
+                      }
+                    }}
+                    className="size-3.5 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                  />
+                  <div className="flex flex-col select-none">
+                    <span className="font-semibold text-[10px] leading-tight">{ws.name}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-1.5 pt-1">
+          <button
+            onClick={() => setPopoverOpen(false)}
+            className="h-7 px-2.5 text-[10px] font-semibold rounded hover:bg-accent cursor-pointer border border-border text-foreground bg-transparent"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleApply}
+            className="h-7 px-3 text-[10px] font-semibold rounded bg-primary text-primary-foreground hover:bg-primary/95 cursor-pointer"
+          >
+            Apply
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 };

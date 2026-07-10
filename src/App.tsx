@@ -25,7 +25,7 @@ function MyRegistryRedirect() {
 }
 
 function AppContent() {
-  const { currentUser } = useRegistry();
+  const { currentUser, can } = useRegistry();
 
   if (!currentUser) {
     return <SsoLogin />;
@@ -42,7 +42,7 @@ function AppContent() {
         <Route path="/prompts/:id" element={<PromptDetailPage />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/register" element={can('register') ? <RegisterPage /> : <Navigate to="/approvals" replace />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/my-registry" element={<MyRegistryRedirect />} />
         <Route path="*" element={<Navigate to="/" replace />} />
