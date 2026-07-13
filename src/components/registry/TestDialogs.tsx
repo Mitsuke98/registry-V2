@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useRegistry } from '@/data/RegistryContext';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -19,16 +18,13 @@ interface EnableToggleProps {
 }
 
 export const EnableToggle: React.FC<EnableToggleProps> = ({
-  itemKey,
+  itemKey: _itemKey,
   capabilityKind,
   capabilityName
 }) => {
-  const { enabledCapabilities, toggleCapability } = useRegistry();
-  const key = `${itemKey}:${capabilityKind}:${capabilityName}`;
-  const isEnabled = enabledCapabilities[key] ?? true;
-
+  const [isEnabled, setIsEnabled] = useState(true);
   const handleToggle = () => {
-    toggleCapability(itemKey, capabilityKind, capabilityName);
+    setIsEnabled(!isEnabled);
     const nextState = !isEnabled;
     toast.success(
       `${capabilityKind.charAt(0).toUpperCase() + capabilityKind.slice(1)} "${capabilityName}" is now ${

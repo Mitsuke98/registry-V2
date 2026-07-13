@@ -1,1009 +1,1257 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRegistry } from '@/data/RegistryContext';
-import { usePageSearch } from '@/context/SearchContext';
-import { useDetailTab } from '@/context/DetailTabContext';
+import { 
+  EntityIcon, CatPill, StatusBadge, HealthDot, RatePopover, BookmarkToggle, 
+  EnableToggle, TestButton, EmptyState, CopyBlock
+} from '@/components/registry/Kit';
+import { SmartTable, StatCard } from '@/components/registry/Primitives';
+import { 
+  Edit, Globe, AlertTriangle
+} from 'lucide-react';
 import { toast } from 'sonner';
-import { ChartCard } from '@/components/registry/ChartCard';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DetailHeader } from '@/components/registry/DetailHeader';
-import { StatusPillCard } from '@/components/registry/StatusPillCard';
-import type { StatusPillConfig } from '@/components/registry/StatusPillCard';
-import { DetailTabs } from '@/components/registry/DetailTabs';
-import { SubTabs } from '@/components/registry/SubTabs';
-import { SmartTable } from '@/components/registry/SmartTable';
-import { EnableToggle, TestButton } from '@/components/registry/TestDialogs';
-import { VersionsTable } from '@/components/registry/VersionsTable';
-import { VerifiedBadge, ScanGrade, StatusBadge, RatingStars, RatePopover, BookmarkToggle, CopyBlock, EmptyState, VisibilityPopover } from '@/components/registry/UIHelperKit';
-import { Wrench, FileText, MessageSquare, Activity } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { TableRow, TableCell } from '@/components/ui/table';
-import { EditAssetDialog } from '@/components/registry/EditAssetDialog';
-import { Edit, Trash2 } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 
 export const ServerDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { mcpServers, toggleServerHealth, can, updateItem, deleteItem, setItemDisabled } = useRegistry();
-  const detailTabContext = useDetailTab();
+  const { 
+    mcpServers, currentUser, bookmarks, toggleBookmark, rateItem, 
+    updateItem, setItemDisabled, setItemVisibility, requestDeletion, 
+    cancelDeletionRequest, deleteItemDirect, can, workspaces, toggleCapabilityItem, getHealthDisplay
+  } = useRegistry();
 
-  const activeTab = searchParams.get('tab') || 'overview';
-  const [overviewSubTab, setOverviewSubTab] = useState<'info' | 'connection' | 'registry'>('info');
-  const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
-
-  // Edit / Delete states
-  const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-
-  // Integration lang selection
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [integrationLang, setIntegrationLang] = useState<'ts' | 'python'>('ts');
-  const [responseSubTab, setResponseSubTab] = useState<'success' | 'errors' | 'format'>('success');
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [simulateFail, setSimulateFail] = useState(false);
+  const [selectedAuditRecord, setSelectedAuditRecord] = useState<any | null>(null);
+  const [isVisibilityOpen, setIsVisibilityOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDelReqOpen, setIsDelReqOpen] = useState(false);
+  const [delReason, setDelReason] = useState('');
+  
+  // Edit Form Fields
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
 
-  const server = mcpServers.find((s) => s.id === id);
-
-  usePageSearch(server ? `Search in ${server.name}...` : 'Search server details...');
+  // Find asset
+  const server = mcpServers.find(s => s.id === id);
 
   useEffect(() => {
     if (server) {
-      detailTabContext?.setActiveTab(activeTab === 'overview' ? '' : activeTab);
+      setEditName(server.name);
+      setEditDesc(server.description);
     }
-    return () => {
-      detailTabContext?.setActiveTab('');
-    };
-  }, [activeTab, server, detailTabContext]);
+  }, [server]);
+
+  // Handle tab URL syncing
+  const handleTabChange = (tabKey: string) => {
+    setActiveTab(tabKey);
+    setSearchParams({ tab: tabKey });
+  };
 
   if (!server) {
     return (
-      <EmptyState
-        message="Server not found. The server you are looking for does not exist."
-        actionLabel="Back to Catalog"
-        onAction={() => window.history.back()}
-      />
+      <div className="p-8 text-center">
+        <h2 className="text-sm font-bold text-gray-800">MCP Server not found.</h2>
+        <button 
+          onClick={() => navigate('/catalog')}
+          className="mt-4 px-3.5 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground cursor-pointer"
+        >
+          Return to Catalog
+        </button>
+      </div>
     );
   }
 
-  const handleTabChange = (key: string) => {
-    setSearchParams({ tab: key });
+  const isBookmarked = bookmarks.server?.includes(server.id) || false;
+  const isOwner = currentUser?.name === server.ownerName;
+  const showEditButton = (isOwner && (server.status === 'pending' || server.status === 'in_review')) || (currentUser?.role === 'super_admin');
+
+  // Chart telemetry data
+  const chartData = server.weeklyCalls?.map((calls, idx) => ({
+    week: `W${idx + 1}`,
+    calls,
+    errors: server.weeklyErrors?.[idx] || 0
+  })) || [];
+
+
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editName.trim()) {
+      toast.error('Name is required.');
+      return;
+    }
+    updateItem('server', server.id, { name: editName, description: editDesc });
+    setIsEditOpen(false);
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  const handleDirectDelete = () => {
+    deleteItemDirect('server', server.id);
+    navigate('/catalog');
+    toast.success('MCP Server deleted.');
   };
 
-  const formatDateTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+  const handleSubmitDelReq = () => {
+    requestDeletion('server', server.id, delReason);
+    setIsDelReqOpen(false);
   };
 
-  const chartData = server.weeklyCalls.map((calls, index) => ({
-    name: `W${index + 1}`,
-    Calls: calls,
-  }));
-
-  // Pills Config
-  const statusPills: StatusPillConfig[] = [
-    { label: 'Health Status', value: server.health.status, variant: 'health' },
-    { label: 'Approval Status', value: server.status, variant: 'approval' },
-    { label: 'Entity Type', value: 'MCP Server', variant: 'neutral' },
-    { label: 'Transport Mode', value: server.transport.toUpperCase(), variant: 'neutral' }
-  ];
-
-  const tabs = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'tools', label: 'Tools' },
-    { key: 'resources', label: 'Resources' },
-    { key: 'prompts', label: 'Prompts' },
-    { key: 'audit-log', label: 'Audit Log' },
-    { key: 'health-status', label: 'Health Status' },
-    { key: 'integration', label: 'Integration' },
-    { key: 'security', label: 'Security' },
-    { key: 'version', label: 'Version' }
-  ];
-
-  // Similar tools popover mapping
-  const mockSimilarTools: Record<string, { name: string; serverId: string; serverName: string }[]> = {
-    'git_clone': [
-      { name: 'git_commit', serverId: 'github-mcp', serverName: 'GitHub MCP' },
-      { name: 'local_file_sync', serverId: 'filesystem-mcp', serverName: 'Filesystem MCP' }
-    ],
-    'git_commit': [
-      { name: 'git_clone', serverId: 'github-mcp', serverName: 'GitHub MCP' },
-      { name: 'write_file_content', serverId: 'filesystem-mcp', serverName: 'Filesystem MCP' }
-    ],
-    'create_pull_request': [
-      { name: 'explain_pull_request', serverId: 'github-mcp', serverName: 'GitHub MCP' }
-    ],
-    'execute_sql_query': [
-      { name: 'describe_database_table', serverId: 'postgres-mcp', serverName: 'Postgres MCP' }
-    ]
+  const handleCancelDelReq = () => {
+    cancelDeletionRequest('server', server.id);
   };
 
-  // Integration Snippets
-  const cliInstall = integrationLang === 'ts'
-    ? `npm install -g @modelcontextprotocol/server-${server.id}`
-    : `pip install mcp-server-${server.id}`;
+  const handleRunHealthCheck = () => {
+    setIsCheckingHealth(true);
+    toast.info('Initializing system health check scan...');
+    
+    setTimeout(() => {
+      if (simulateFail) {
+        toast.error('Health scan complete: Critical threat threshold failure!');
+        
+        const nextTelemetry = {
+          uptimePct: 88.4,
+          p95LatencyMs: 184,
+          errorRatePct: 12.5
+        };
 
-  const codeExample = integrationLang === 'ts'
-    ? `import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+        const checkRecord = {
+          timestamp: new Date().toISOString(),
+          status: 'unhealthy',
+          performedBy: currentUser?.name || 'System Scanner',
+          responseMs: 184
+        };
 
-const transport = new StdioClientTransport({
-  command: "npx",
-  args: ["-y", "@modelcontextprotocol/server-${server.id}"]
-});
+        const auditRecord = {
+          editedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'System Scanner',
+          healthStatus: 'Unhealthy',
+          whatChanged: 'System Health Scan failed security threshold',
+          remark: 'Manual simulation trigger: asset returned unhealthy status code and telemetry checks failed.'
+        };
 
-const client = new Client({
-  name: "example-client",
-  version: "1.0.0"
-});
+        updateItem('server', server.id, {
+          health: {
+            ...server.health,
+            status: 'unhealthy',
+            ...nextTelemetry
+          },
+          healthChecks: [checkRecord, ...(server.healthChecks || [])],
+          auditRecords: [auditRecord, ...(server.auditRecords || [])]
+        });
+      } else {
+        toast.success('Health scan complete: All telemetry components healthy.');
+        const nextTelemetry = {
+          uptimePct: 99.9,
+          p95LatencyMs: 14,
+          errorRatePct: 0.01
+        };
 
-await client.connect(transport);
-console.log("Connected to ${server.name}!");
-const tools = await client.listTools();
-console.log("Available tools:", tools);`
-    : `import asyncio
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+        const checkRecord = {
+          timestamp: new Date().toISOString(),
+          status: 'healthy',
+          performedBy: currentUser?.name || 'System Scanner',
+          responseMs: 14
+        };
 
-server_params = StdioServerParameters(
-    command="npx",
-    args=["-y", "@modelcontextprotocol/server-${server.id}"]
-)
+        const auditRecord = {
+          editedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'System Scanner',
+          healthStatus: 'Healthy',
+          whatChanged: 'System Health Scan passed successfully',
+          remark: 'Manual simulation trigger: asset telemetry verification successfully returned status healthy.'
+        };
 
-async def main():
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            print("Available tools:", tools)
-
-asyncio.run(main())`;
-
-  const successResponse = `{
-  "jsonrpc": "2.0",
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "Success response preview content structure"
+        updateItem('server', server.id, {
+          health: {
+            ...server.health,
+            status: 'healthy',
+            ...nextTelemetry
+          },
+          healthChecks: [checkRecord, ...(server.healthChecks || [])],
+          auditRecords: [auditRecord, ...(server.auditRecords || [])]
+        });
       }
-    ]
-  },
-  "id": 1
-}`;
-
-  const commonErrors = `{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32601,
-    "message": "Method not found: ${server.id}/unknown_method"
-  },
-  "id": 1
-}`;
-
-  const errorFormat = `{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32603,
-    "message": "Internal gateway protocol error",
-    "data": "Stacktrace dumps if developer-mode is active"
-  },
-  "id": null
-}`;
-
-  // Security Check Rules
-  const securityRules = [
-    { rule: 'Sandbox Escapes & Jail Check', severity: 'High', status: server.trust.score >= 85 ? 'pass' : 'warn', detail: 'Prevents reading files outside root directory scopes.' },
-    { rule: 'Third-party Dependency Audits', severity: 'High', status: server.trust.score >= 90 ? 'pass' : 'fail', detail: 'Checks for known vulnerabilities in package trees.' },
-    { rule: 'Hardcoded Authentication Secrets', severity: 'High', status: 'pass', detail: 'Zero static passwords or API tokens found.' },
-    { rule: 'Network Access Sanity', severity: 'Medium', status: server.transport === 'http' || server.transport === 'sse' ? 'warn' : 'pass', detail: 'HTTP transports require certified SSL targets.' },
-    { rule: 'Process Execution Safety', severity: 'Medium', status: 'pass', detail: 'Restricts arbitrary shell spawns.' },
-    { rule: 'Memory Allocations Overhead', severity: 'Low', status: 'pass', detail: 'Memory footprints remain under 60MB thresholds.' },
-    { rule: 'License Compliance Check', severity: 'Low', status: 'pass', detail: 'Permissive OS license matches policy rules.' },
-    { rule: 'API Call Rate Limits', severity: 'Low', status: 'pass', detail: 'Internal request throttles are configured.' }
-  ];
+      setIsCheckingHealth(false);
+    }, 1500);
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <DetailHeader
-        iconName={server.iconName || 'wrench'}
-        name={server.name}
-        badgeCluster={
-          <>
-            <StatusBadge status={server.status} />
-            {server.disabled && (
-              <span className="text-[10px] font-bold border border-red-500/20 bg-red-500/5 text-red-600 px-1.5 py-0.5 rounded uppercase leading-none">
-                Disabled
-              </span>
-            )}
-            {server.trust.verified && <VerifiedBadge />}
-            <ScanGrade score={server.trust.score} />
-          </>
-        }
-        description={server.description}
-        metaLine={
-          <>
-            <span className="font-semibold text-foreground">{server.publisher}</span>
-            <span>·</span>
-            <span>Registered {formatDate(server.registeredAt)}</span>
-            <span>·</span>
-            <RatingStars rating={server.rating} reviewsCount={server.reviewsCount} />
-          </>
-        }
-        tags={server.tags}
-        actionSlot={
-          <>
-            <BookmarkToggle kind="server" id={server.id} />
-            <RatePopover kind="server" id={server.id} />
-            <VisibilityPopover kind="server" id={server.id} />
-            
-            {can('edit', server) && (
-              <Button variant="outline" onClick={() => setIsEditOpen(true)} className="h-9 text-xs font-semibold gap-1.5 cursor-pointer">
-                <Edit className="size-3.5" />
-                <span>Edit</span>
-              </Button>
-            )}
+    <div className="relative select-none pb-12">
+      
+      {/* Sticky Detail Header on scroll */}
+      <div className="sticky top-0 bg-white/95 border-b border-gray-200 px-6 py-3 flex items-center justify-between z-20 backdrop-blur-sm">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <EntityIcon kind="server" size="sm" />
+          <div className="min-w-0">
+            <h1 className="text-xs font-bold text-gray-800 truncate">{server.name}</h1>
+            <p className="text-[10px] text-gray-400 mt-0.5 truncate font-mono-custom">v{server.version} · {server.publisher?.name || 'Community'}</p>
+          </div>
+          <div className="flex gap-1.5 items-center shrink-0">
+            <StatusBadge status={server.status} disabled={server.disabled} deletionRequested={server.deletionRequested} />
+            <HealthDot status={server.health?.status || 'healthy'} />
+          </div>
+        </div>
 
-            {can('delete', server) && (
-              <Button variant="destructive" onClick={() => setIsDeleteOpen(true)} className="h-9 text-xs font-semibold gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer">
-                <Trash2 className="size-3.5" />
-                <span>Delete</span>
-              </Button>
-            )}
+        {/* Action Controls */}
+        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          <BookmarkToggle isBookmarked={isBookmarked} onToggle={() => toggleBookmark('server', server.id)} />
+          <RatePopover itemId={server.id} currentRating={server.rating} onRate={(r) => rateItem('server', server.id, r)} />
+          
+          {/* Enable/Disable Switch (Owner/SA) */}
+          {can('toggle-disabled', server) && (
+            <div className="flex items-center gap-2 border border-gray-200 rounded px-2.5 py-1 bg-white text-xs select-none">
+              <span className="text-[11px] font-semibold text-gray-500">Enabled</span>
+              <EnableToggle checked={!server.disabled} onChange={(checked) => setItemDisabled('server', server.id, !checked)} />
+            </div>
+          )}
 
-            {can('toggle-disabled', server) && (
-              <div className="flex items-center gap-2 border border-border rounded-lg px-3 h-9 bg-background select-none">
-                <span className="text-xs text-muted-foreground font-semibold">Enabled</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={!server.disabled}
-                    onChange={() => setItemDisabled('server', server.id, !server.disabled)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-8 h-4 bg-muted/80 rounded-full peer peer-focus:ring-1 peer-focus:ring-primary/20 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary relative"></div>
-                </label>
-              </div>
-            )}
+          {/* Visibility Popover (Owner/SA) */}
+          {can('set-visibility', server) && (
+            <div className="relative">
+              <button 
+                onClick={() => setIsVisibilityOpen(!isVisibilityOpen)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
+              >
+                <Globe className="w-3.5 h-3.5 text-gray-500" />
+                Visibility
+              </button>
+              {isVisibilityOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsVisibilityOpen(false)}></div>
+                  <div className="absolute right-0 mt-1.5 w-64 bg-white border border-gray-200 rounded-md p-4 shadow-floating z-50">
+                    <h4 className="text-xs font-bold text-gray-800 mb-2.5 border-b pb-1.5">Visibility settings</h4>
+                    
+                    <div className="flex items-center justify-between text-xs mb-3">
+                      <span className="font-semibold text-gray-600">Public (Global)</span>
+                      <input 
+                        type="checkbox" 
+                        checked={server.visibility?.global || false} 
+                        onChange={(e) => setItemVisibility('server', server.id, {
+                          global: e.target.checked,
+                          workspaceIds: server.visibility?.workspaceIds || []
+                        })}
+                        className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                      />
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Workspaces Share</span>
+                      <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                        {workspaces.map(ws => {
+                          const isChecked = server.visibility?.workspaceIds?.includes(ws.id) || false;
+                          return (
+                            <label key={ws.id} className="flex items-center gap-2 text-xs p-1 hover:bg-gray-50 rounded cursor-pointer">
+                              <input 
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  const list = server.visibility?.workspaceIds || [];
+                                  const nextList = e.target.checked 
+                                    ? [...list, ws.id]
+                                    : list.filter(wId => wId !== ws.id);
+                                  setItemVisibility('server', server.id, {
+                                    global: server.visibility?.global || false,
+                                    workspaceIds: nextList
+                                  });
+                                }}
+                                className="rounded border-gray-300 text-primary focus:ring-primary"
+                              />
+                              <span className="truncate font-semibold text-gray-700">{ws.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
+          {/* Edit (Owner conditionally/SA always) */}
+          {showEditButton && (
             <button
-              onClick={() => {
-                toggleServerHealth(server.id);
-                toast.success('Simulated server health status toggle!');
-              }}
-              className="h-9 px-4 rounded-lg border border-border bg-background hover:bg-accent/60 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              onClick={() => setIsEditOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
             >
-              <Activity className="size-3.5" />
-              <span>Use server</span>
+              <Edit className="w-3.5 h-3.5" />
+              Edit
             </button>
-          </>
-        }
-      />
+          )}
 
-      {/* Status Pill Card */}
-      <StatusPillCard pills={statusPills} />
+          {/* Disabled Delete Button */}
+          <button
+            disabled
+            className="px-2.5 py-1 text-xs font-semibold rounded bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+            title="Deletions must be requested — use Request deletion"
+          >
+            Delete
+          </button>
 
-      {/* Detail Tabs */}
-      <DetailTabs
-        tabs={tabs}
-        activeTab={activeTab}
-        onChange={handleTabChange}
-      />
+          {/* Actionable deletion requests for Owner only */}
+          {isOwner && (
+            server.deletionRequested ? (
+              <button
+                onClick={handleCancelDelReq}
+                className="px-2.5 py-1 text-xs font-semibold rounded bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 cursor-pointer focus:outline-none"
+              >
+                Cancel Deletion
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsDelReqOpen(true)}
+                className="px-2.5 py-1 text-xs font-semibold rounded bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer focus:outline-none"
+              >
+                Request Deletion
+              </button>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* 9 Detail Tabs Strip */}
+      <div className="px-6 border-b border-gray-200 bg-white select-none">
+        <div className="flex items-center gap-6 overflow-x-auto">
+          {[
+            { key: 'overview', label: 'Overview' },
+            { key: 'tools', label: `Tools (${server.tools?.length || 0})` },
+            { key: 'resources', label: `Resources (${server.resources?.length || 0})` },
+            { key: 'prompts', label: `Prompts (${server.prompts?.length || 0})` },
+            { key: 'audit-log', label: 'Audit Log' },
+            { key: 'health-status', label: 'Health status' },
+            { key: 'integration', label: 'Integration' },
+            { key: 'security', label: 'Security' },
+            { key: 'version', label: 'Version' }
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => handleTabChange(tab.key)}
+              className={`py-3 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap focus:outline-none ${
+                activeTab === tab.key 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Tab Contents */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <SubTabs
-            tabs={[
-              { key: 'info', label: 'Capability Overview' },
-              { key: 'connection', label: 'Connection & Publisher' },
-              { key: 'registry', label: 'Registry & Compliance' }
-            ]}
-            activeTab={overviewSubTab}
-            onChange={(key) => setOverviewSubTab(key as any)}
-          />
-
-          {overviewSubTab === 'info' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 select-none">
-                <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                  <div className="text-[12px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">Uptime Status</div>
-                  <div className="flex items-center gap-2">
-                    <span className={`size-2.5 rounded-full shrink-0 ${server.health.status === 'healthy' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                    <span className="text-2xl font-bold tabular-nums text-foreground">{server.health.uptimePct.toFixed(2)}%</span>
-                  </div>
-                </Card>
-                <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                  <div className="text-[12px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">p95 Latency</div>
-                  <div className="text-2xl font-bold tabular-nums text-foreground">{server.health.p95LatencyMs}ms</div>
-                </Card>
-                <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                  <div className="text-[12px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">Error Rate</div>
-                  <div className="text-2xl font-bold tabular-nums text-foreground">{server.health.errorRatePct.toFixed(2)}%</div>
-                </Card>
+      <div className="p-6">
+        
+        {/* Tab 1: Overview */}
+        {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+            {/* Left Column (~2/3) */}
+            <div className="xl:col-span-2 space-y-6">
+              {/* Description Card */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 select-none">Capabilities & Features</h3>
+                <p className="text-xs text-gray-600 leading-relaxed mb-4">{server.description}</p>
+                
+                {/* Capabilities badges row */}
+                <div className="flex flex-wrap gap-2 select-none">
+                  {server.capabilities?.tools !== false && (
+                    <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-blue-50 text-blue-700 border border-blue-100">
+                      {server.tools?.filter(t => !t.disabled).length || 0} tools · {server.tools?.length || 0} total
+                    </span>
+                  )}
+                  {server.capabilities?.resources !== false && (
+                    <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-teal-50 text-teal-700 border border-teal-100">
+                      {server.resources?.filter(r => !r.disabled).length || 0} resources · {server.resources?.length || 0} total
+                    </span>
+                  )}
+                  {server.capabilities?.prompts !== false && (
+                    <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-orange-50 text-orange-700 border border-orange-100">
+                      {server.prompts?.filter(p => !p.disabled).length || 0} prompts · {server.prompts?.length || 0} total
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <ChartCard
-                type="area"
-                title="Usage — last 12 weeks calls"
-                data={chartData}
-                series={[{ key: 'Calls', stroke: 'oklch(0.2657 0.1001 279.46)' }]}
-              />
+              {/* Connection & Publisher Card */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Connection & Publisher Specs</h3>
+                <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-6 text-xs pt-1">
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Declared Endpoint</dt>
+                    <dd className="font-mono bg-gray-50 border p-1 px-2 rounded text-gray-700 truncate select-all">{server.tech?.endpoint || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Gateway Route URL</dt>
+                    <dd className="font-mono bg-gray-50 border p-1 px-2 rounded text-gray-700 truncate select-all">{server.tech?.gatewayUrl || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Publisher Identity</dt>
+                    <dd className="font-bold text-gray-700">{server.publisher?.name || 'Community'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Publisher Email Contact</dt>
+                    <dd className="font-mono text-gray-700 select-all">{server.publisher?.email || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Authorization Method</dt>
+                    <dd className="font-semibold text-gray-700 uppercase">{server.tech?.authType || 'none'}</dd>
+                  </div>
+                  {server.tech?.authType === 'api-key' && (
+                    <>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">API Key Header Name</dt>
+                        <dd className="font-mono text-gray-700">{(server.tech as any).apiKeyHeaderName || 'X-API-Key'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Key Format Pattern</dt>
+                        <dd className="font-mono text-gray-700">{(server.tech as any).apiKeyFormat || '—'}</dd>
+                      </div>
+                    </>
+                  )}
+                  {server.tech?.authType === 'oauth2' && (
+                    <>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Authorization URL</dt>
+                        <dd className="font-mono text-gray-700">{(server.tech as any).authorizationUrl || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Token URL</dt>
+                        <dd className="font-mono text-gray-700">{(server.tech as any).tokenUrl || '—'}</dd>
+                      </div>
+                      <div className="md:col-span-2">
+                        <dt className="text-gray-400 font-semibold mb-1">Scopes</dt>
+                        <dd className="font-mono text-gray-700">{(server.tech as any).scopes || '—'}</dd>
+                      </div>
+                    </>
+                  )}
+                  {server.tech?.authType === 'bearer' && (
+                    <>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Token Endpoint</dt>
+                        <dd className="font-mono text-gray-700">{(server.tech as any).tokenEndpoint || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Refresh URL</dt>
+                        <dd className="font-mono text-gray-700">{(server.tech as any).refreshUrl || '—'}</dd>
+                      </div>
+                    </>
+                  )}
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Transport Medium</dt>
+                    <dd className="font-semibold text-gray-700 uppercase">{server.tech?.transport || 'http'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Protocol Version</dt>
+                    <dd className="font-mono text-gray-700">{server.tech?.protocolVersion || '1.0.0'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Resource URLs</dt>
+                    <dd className="flex items-center gap-3">
+                      {server.tech?.docsUrl && (
+                        <a href={server.tech.docsUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-semibold">Docs</a>
+                      )}
+                      {server.tech?.sourceUrl && (
+                        <a href={server.tech.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-semibold">Source Code</a>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
 
-              <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                <h3 className="text-sm font-bold text-foreground mb-3">Capabilities & Features</h3>
-                <div className="flex flex-wrap gap-3">
-                  <div className="flex items-center gap-2 border border-border/80 bg-muted/20 px-3.5 py-2 rounded-lg text-xs text-foreground font-semibold">
-                    <Wrench className="size-4 text-primary" />
-                    <span>{server.tools.length} Tools</span>
-                  </div>
-                  <div className="flex items-center gap-2 border border-border/80 bg-muted/20 px-3.5 py-2 rounded-lg text-xs text-foreground font-semibold">
-                    <FileText className="size-4 text-primary" />
-                    <span>{server.resources.length} Resources</span>
-                  </div>
-                  <div className="flex items-center gap-2 border border-border/80 bg-muted/20 px-3.5 py-2 rounded-lg text-xs text-foreground font-semibold">
-                    <MessageSquare className="size-4 text-primary" />
-                    <span>{server.prompts.length} Templates</span>
-                  </div>
+              {/* Uptime Stat cards */}
+              <div className="grid grid-cols-3 gap-4 select-none">
+                <StatCard label="Health Uptime" value={`${server.health?.uptimePct || 100}%`} subtext="Past 30 days status checks" />
+                <StatCard label="p95 Response Latency" value={`${server.health?.p95LatencyMs || 0}ms`} subtext="Average request response delay" />
+                <StatCard label="Error Rate" value={`${server.health?.errorRatePct || 0}%`} subtext="Failed request percentage" />
+              </div>
+
+              {/* Weekly Telemetry calls Chart */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 select-none">Calls & Telemetry Usage History (30d)</h3>
+                <div className="h-44 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="week" stroke="#9ca3af" fontSize={10} tickLine={false} />
+                      <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="calls" stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.08} strokeWidth={1.5} />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
-              </Card>
+              </div>
             </div>
-          )}
 
-          {overviewSubTab === 'connection' && (
-            <Card className="bg-card border-border rounded-xl shadow-none p-6 space-y-4">
-              <h3 className="text-sm font-bold text-foreground">Connection & Publisher Information</h3>
-              <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-xs">
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Connection Endpoint</dt>
-                  <dd className="font-mono bg-muted p-1 px-2 rounded text-foreground select-all inline-block truncate max-w-full">
-                    http://localhost:8080/mcp/{server.id}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Gateway URL</dt>
-                  <dd className="font-mono bg-muted p-1 px-2 rounded text-foreground select-all inline-block truncate max-w-full">
-                    https://api.modelcontextprotocol.io/v1/sse/{server.id}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Publisher Name</dt>
-                  <dd className="font-semibold text-foreground">{server.publisher}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Publisher Contact</dt>
-                  <dd className="font-mono text-foreground">{server.publisher.toLowerCase().replace(' ', '')}@registry.org</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Authentication Type</dt>
-                  <dd className="font-semibold text-foreground">OAuth 2.0 / Bearer Auth</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Protocol Version</dt>
-                  <dd className="font-mono text-foreground">MCP 1.0.0 (Standard)</dd>
-                </div>
-              </dl>
-            </Card>
-          )}
-
-          {overviewSubTab === 'registry' && (
-            <Card className="bg-card border-border rounded-xl shadow-none p-6 space-y-4">
-              <h3 className="text-sm font-bold text-foreground">Registry Registry Compliance</h3>
-              <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-xs font-mono">
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">Compliance Status</dt>
-                  <dd className="font-sans font-semibold text-emerald-600">Fully Compliant</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">Submitted Date</dt>
-                  <dd className="text-foreground">{formatDate(server.registeredAt)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">Last Updated</dt>
-                  <dd className="text-foreground">{formatDate(server.updatedAt)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">License</dt>
-                  <dd className="font-sans font-semibold text-foreground">MIT License</dd>
-                </div>
-              </dl>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'tools' && (
-        <SmartTable
-          searchPlaceholder="Search tools..."
-          searchKeys={['name', 'description']}
-          columns={[
-            {
-              key: 'name',
-              header: 'Name',
-              className: 'w-[220px] font-mono font-bold text-foreground py-2 select-all',
-              render: (row) => <span>{row.name}</span>
-            },
-            {
-              key: 'description',
-              header: 'Description',
-              render: (row) => <span className="text-muted-foreground">{row.description}</span>
-            },
-            {
-              key: 'action',
-              header: 'Status',
-              className: 'w-[100px] text-center',
-              render: (row) => (
-                <div className="flex justify-center">
-                  <EnableToggle itemKey={server.id} capabilityKind="tool" capabilityName={row.name} />
-                </div>
-              )
-            },
-            {
-              key: 'similar',
-              header: 'Similar Tools',
-              className: 'w-[120px] text-center select-none',
-              render: (row) => {
-                const similar = mockSimilarTools[row.name] || [];
-                if (similar.length === 0) return <span className="text-xs text-muted-foreground/60">-</span>;
-                return (
-                  <div className="flex justify-center">
-                    <select
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val) {
-                          window.location.hash = `/servers/${val}`;
-                        }
-                      }}
-                      className="text-[11px] font-semibold border border-border rounded bg-muted/30 p-1 cursor-pointer focus:outline-none"
-                    >
-                      <option value="">Find similar...</option>
-                      {similar.map((sim, sIdx) => (
-                        <option key={sIdx} value={sim.serverId}>
-                          {sim.name} ({sim.serverName})
-                        </option>
-                      ))}
-                    </select>
+            {/* Right Column (~1/3) */}
+            <div className="space-y-6">
+              {/* StatusPillCard */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Operational State</h3>
+                <div className="grid grid-cols-2 gap-4 text-xs">
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Health Status</span>
+                    <HealthDot status={getHealthDisplay(server)} showLabel />
                   </div>
-                );
-              }
-            },
-            {
-              key: 'test',
-              header: 'Test',
-              className: 'w-[80px] text-center',
-              render: (row) => <TestButton name={row.name} kind="tool" />
-            }
-          ]}
-          rows={server.tools}
-        />
-      )}
-
-      {activeTab === 'resources' && (
-        <SmartTable
-          searchPlaceholder="Search resources..."
-          searchKeys={['name', 'uri', 'mimeType']}
-          columns={[
-            {
-              key: 'name',
-              header: 'Resource Name',
-              className: 'font-semibold text-foreground py-2',
-              render: (row) => <span>{row.name}</span>
-            },
-            {
-              key: 'uri',
-              header: 'URI Pattern',
-              className: 'font-mono text-muted-foreground max-w-[320px] select-all truncate',
-              render: (row) => <span title={row.uri}>{row.uri}</span>
-            },
-            {
-              key: 'mimeType',
-              header: 'MIME Type',
-              className: 'font-mono text-[12.5px]',
-              render: (row) => <span>{row.mimeType || 'application/json'}</span>
-            },
-            {
-              key: 'action',
-              header: 'Status',
-              className: 'w-[100px] text-center',
-              render: (row) => (
-                <div className="flex justify-center">
-                  <EnableToggle itemKey={server.id} capabilityKind="resource" capabilityName={row.name} />
-                </div>
-              )
-            },
-            {
-              key: 'test',
-              header: 'Test',
-              className: 'w-[80px] text-center',
-              render: (row) => <TestButton name={row.name} kind="resource" />
-            }
-          ]}
-          rows={server.resources}
-        />
-      )}
-
-      {activeTab === 'prompts' && (
-        <SmartTable
-          searchPlaceholder="Search prompts..."
-          searchKeys={['name', 'description']}
-          columns={[
-            {
-              key: 'name',
-              header: 'Name',
-              className: 'w-[200px] font-mono font-bold text-foreground py-2 select-all',
-              render: (row) => <span>{row.name}</span>
-            },
-            {
-              key: 'description',
-              header: 'Description',
-              render: (row) => <span className="text-muted-foreground">{row.description}</span>
-            },
-            {
-              key: 'arguments',
-              header: 'Arguments',
-              className: 'w-[100px] text-center font-semibold text-foreground',
-              render: (row) => <span>{row.args?.length || 0} args</span>
-            },
-            {
-              key: 'action',
-              header: 'Status',
-              className: 'w-[100px] text-center',
-              render: (row) => (
-                <div className="flex justify-center">
-                  <EnableToggle itemKey={server.id} capabilityKind="prompt" capabilityName={row.name} />
-                </div>
-              )
-            },
-            {
-              key: 'test',
-              header: 'Test',
-              className: 'w-[80px] text-center',
-              render: (row) => <TestButton name={row.name} kind="prompt" />
-            }
-          ]}
-          rows={server.prompts}
-        />
-      )}
-
-      {activeTab === 'audit-log' && (
-        <SmartTable
-          searchPlaceholder="Search logs..."
-          searchKeys={['whatUpdated', 'updatedBy', 'auditorRemark']}
-          columns={[
-            { key: 'status', header: 'Status' },
-            { key: 'whatUpdated', header: 'Change' },
-            { key: 'updatedBy', header: 'Actor' },
-            { key: 'auditorRemark', header: 'Auditor Remark' },
-            { key: 'date', header: 'Date' }
-          ]}
-          rows={server.auditLogs || []}
-          renderRow={(row, rIdx, cols) => (
-            <TableRow key={row.id || rIdx} className="hover:bg-transparent border-0">
-              <TableCell colSpan={cols.length} className="p-2 border-0">
-                <div className="border border-border/80 rounded-xl p-4 bg-card shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-2 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full border border-border/50 ${
-                        row.status.toLowerCase() === 'approved' || row.status.toLowerCase() === 'healthy'
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                      }`}>
-                        <span className={`size-1.5 rounded-full ${row.status.toLowerCase() === 'approved' || row.status.toLowerCase() === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                        <span>{row.status}</span>
-                      </span>
-                      <span className="text-xs font-mono text-muted-foreground select-all">{row.updatedBy}</span>
-                    </div>
-                    <h4 className="text-[13.5px] font-semibold text-foreground">{row.whatUpdated}</h4>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{row.auditorRemark}</p>
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Approval State</span>
+                    <span className={`inline-block font-semibold px-2 py-0.5 rounded-full border text-[11px] badge-status-${server.status}`}>
+                      {server.status.toUpperCase()}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0 self-end sm:self-center select-none">
-                    <span className="text-xs text-muted-foreground font-mono">{formatDateTime(row.date)}</span>
-                    <button
-                      onClick={() => setSelectedAudit(row)}
-                      className="h-8 px-3 rounded border border-border bg-background hover:bg-accent text-xs font-semibold cursor-pointer"
-                    >
-                      View
-                    </button>
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Asset Class</span>
+                    <span className="font-bold text-gray-700">MCP Server</span>
+                  </div>
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Transport</span>
+                    <span className="font-bold font-mono text-gray-700 uppercase">{server.tech?.transport || 'stdio'}</span>
                   </div>
                 </div>
-              </TableCell>
-            </TableRow>
-          )}
-        />
-      )}
+              </div>
 
-      {activeTab === 'health-status' && (
-        <SmartTable
-          searchPlaceholder="Search health checks..."
-          searchKeys={['status', 'performedBy']}
-          columns={[
-            {
-              key: 'timestamp',
-              header: 'Timestamp',
-              className: 'font-mono py-2 w-[220px]',
-              render: (row) => <span>{formatDateTime(row.timestamp)}</span>
-            },
-            {
-              key: 'status',
-              header: 'Status',
-              className: 'w-[120px]',
-              render: (row) => {
-                const isHealthy = row.status === 'healthy';
-                return (
-                  <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                    isHealthy ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
-                  }`}>
-                    <span className={`size-1.5 rounded-full ${isHealthy ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                    <span className="uppercase text-[9px]">{row.status}</span>
-                  </span>
-                );
-              }
-            },
-            {
-              key: 'performedBy',
-              header: 'Performed By',
-              className: 'font-mono text-muted-foreground select-all',
-              render: (row) => <span>{row.performedBy}</span>
-            },
-            {
-              key: 'responseTimeMs',
-              header: 'Response Time',
-              className: 'font-mono tabular-nums text-right w-[140px] pr-4',
-              render: (row) => <span className="font-semibold text-foreground">{row.responseTimeMs} ms</span>
-            }
-          ]}
-          rows={server.healthChecks || []}
-        />
-      )}
-
-      {activeTab === 'integration' && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between select-none">
-            <span className="text-xs font-bold text-foreground uppercase tracking-wider">Client Platform Sample</span>
-            <div className="flex items-center gap-1.5 p-0.5 rounded-lg bg-muted border border-border/40">
-              <button
-                onClick={() => setIntegrationLang('ts')}
-                className={`text-[11px] font-semibold py-1 px-3 rounded-md transition-all cursor-pointer ${
-                  integrationLang === 'ts' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-                }`}
-              >
-                TypeScript
-              </button>
-              <button
-                onClick={() => setIntegrationLang('python')}
-                className={`text-[11px] font-semibold py-1 px-3 rounded-md transition-all cursor-pointer ${
-                  integrationLang === 'python' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-                }`}
-              >
-                Python
-              </button>
+              {/* Registry & compliance card */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Registry & Compliance</h3>
+                <dl className="space-y-3.5 text-xs font-mono">
+                  <div>
+                    <dt className="text-gray-400 font-sans font-semibold mb-0.5">Registered Timestamp</dt>
+                    <dd className="text-gray-700 font-sans font-medium">{new Date(server.registeredAt).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-sans font-semibold mb-0.5">Last Config Update</dt>
+                    <dd className="text-gray-700 font-sans font-medium">{new Date(server.updatedAt).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-sans font-semibold mb-0.5">License Policy Type</dt>
+                    <dd className="text-gray-700 font-sans font-bold">{server.license}</dd>
+                  </div>
+                </dl>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Prerequisites */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Prerequisites</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Install the required execution runtime and protocol client packages:
-            </p>
-            <CopyBlock code={cliInstall} />
-          </Card>
-
-          {/* Endpoint Reference */}
-          <Card className="bg-card border-border rounded-xl shadow-none overflow-hidden">
-            <CardHeader className="p-5 pb-3 border-b border-border bg-muted/20 select-none">
-              <CardTitle className="text-xs font-bold text-foreground uppercase tracking-wider">Endpoint Gateway Reference</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0 divide-y divide-border/60">
-              {[
-                { method: 'POST', endpoint: `tools/list`, purpose: 'Query all registered tools payload schema.' },
-                { method: 'POST', endpoint: `tools/call`, purpose: 'Invoke tool commands inside target server container.' },
-                { method: 'POST', endpoint: `prompts/list`, purpose: 'Retrieve all configured prompt templates.' },
-                { method: 'POST', endpoint: `prompts/get`, purpose: 'Access specific compiled prompt variables.' },
-                { method: 'POST', endpoint: `resources/list`, purpose: 'Query resources schema maps.' },
-                { method: 'POST', endpoint: `resources/read`, purpose: 'Read raw resource text content.' }
-              ].map((routeItem, idx) => (
-                <div key={idx} className="p-4 flex items-center justify-between gap-4 font-mono text-[12px]">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary font-bold text-[10px]">
-                      {routeItem.method}
-                    </span>
-                    <span className="text-foreground font-semibold select-all">/api/mcp/gateway/v1/{routeItem.endpoint}</span>
+        {/* Tab 2: Tools */}
+        {activeTab === 'tools' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4">
+            <SmartTable 
+              data={(server.tools || []).map((t: any) => ({ ...t, id: t.name }))}
+              columns={[
+                {
+                  key: 'name',
+                  header: 'Name',
+                  sortable: true,
+                  render: (row: any) => <span className="font-mono-custom text-gray-800 select-all font-bold">{row.name}</span>
+                },
+                {
+                  key: 'description',
+                  header: 'Description',
+                  render: (row: any) => <span className="text-gray-500">{row.description}</span>
+                },
+                {
+                  key: 'similar',
+                  header: 'Similar Tools',
+                  render: (row: any) => {
+                    const similar = row.similar || [];
+                    if (similar.length === 0) return <span className="text-gray-400">—</span>;
+                    return (
+                      <div className="flex flex-wrap gap-1.5">
+                        {similar.map((s: any) => <CatPill key={s} text={s} />)}
+                      </div>
+                    );
+                  }
+                },
+                {
+                  key: 'invocations30d',
+                  header: 'Invocations (30d)',
+                  sortable: true,
+                  render: (row: any) => <span className="font-mono-custom text-gray-600">{row.invocations30d?.toLocaleString() || 0}</span>
+                },
+                {
+                  key: 'actions',
+                  header: 'Action',
+                  render: (row: any) => {
+                    const isItemDisabled = !!row.disabled;
+                    return (
+                      <div className="flex items-center gap-3">
+                        <span className={`text-[10px] font-bold ${isItemDisabled ? 'text-gray-400' : 'text-emerald-600'}`}>
+                          {isItemDisabled ? 'Off' : 'On'}
+                        </span>
+                        <EnableToggle 
+                          checked={!isItemDisabled} 
+                          onChange={() => toggleCapabilityItem(server.id, 'tools', row.name)}
+                          disabled={!can('toggle-capability', server)}
+                        />
+                        <TestButton name={row.name} kind="tool" disabled={isItemDisabled} />
+                      </div>
+                    );
+                  }
+                }
+              ]}
+              renderExpanded={(row: any) => (
+                <div className="space-y-3 text-xs text-gray-600 max-w-3xl">
+                  <div>
+                    <span className="font-bold text-gray-800 block mb-0.5">Description:</span>
+                    <p className="leading-relaxed">{row.description || 'No description provided.'}</p>
                   </div>
-                  <span className="text-muted-foreground font-sans text-xs">{routeItem.purpose}</span>
+                  {row.params && (
+                    <div>
+                      <span className="font-bold text-gray-800 block mb-1">Input Schema:</span>
+                      <CopyBlock code={JSON.stringify(row.params, null, 2)} language="json" />
+                    </div>
+                  )}
+                  {row.outputSchema && (
+                    <div>
+                      <span className="font-bold text-gray-800 block mb-1">Output Schema:</span>
+                      <CopyBlock code={JSON.stringify(row.outputSchema, null, 2)} language="json" />
+                    </div>
+                  )}
                 </div>
-              ))}
-            </CardContent>
-          </Card>
+              )}
+            />
+          </div>
+        )}
 
-          {/* Required Headers */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-2 select-none">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Required Request Headers</h3>
-            <div className="font-mono text-[12px] bg-muted/65 p-3 rounded-lg border border-border/40 text-foreground space-y-1.5">
-              <div>Content-Type: application/json</div>
-              <div>Authorization: Bearer [your_integration_client_token]</div>
+        {/* Tab 3: Resources */}
+        {activeTab === 'resources' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4">
+            <SmartTable 
+              data={(server.resources || []).map((r: any) => ({ ...r, id: r.name }))}
+              columns={[
+                {
+                  key: 'name',
+                  header: 'Name',
+                  sortable: true,
+                  render: (row: any) => <span className="font-semibold text-gray-800">{row.name}</span>
+                },
+                {
+                  key: 'uriPattern',
+                  header: 'URI Pattern',
+                  render: (row: any) => <span className="font-mono-custom text-gray-550 select-all">{row.uriPattern}</span>
+                },
+                {
+                  key: 'mimeType',
+                  header: 'MIME Type',
+                  render: (row: any) => <span className="font-mono-custom text-gray-400">{row.mimeType}</span>
+                },
+                {
+                  key: 'actions',
+                  header: 'Action',
+                  render: (row: any) => {
+                    const isItemDisabled = !!row.disabled;
+                    return (
+                      <div className="flex items-center gap-3">
+                        <span className={`text-[10px] font-bold ${isItemDisabled ? 'text-gray-400' : 'text-emerald-600'}`}>
+                          {isItemDisabled ? 'Off' : 'On'}
+                        </span>
+                        <EnableToggle 
+                          checked={!isItemDisabled} 
+                          onChange={() => toggleCapabilityItem(server.id, 'resources', row.name)}
+                          disabled={!can('toggle-capability', server)}
+                        />
+                        <TestButton name={row.name} kind="resource" disabled={isItemDisabled} />
+                      </div>
+                    );
+                  }
+                }
+              ]}
+              renderExpanded={(row: any) => (
+                <div className="space-y-2 text-xs text-gray-600">
+                  <div>
+                    <span className="font-bold text-gray-800">Description: </span>
+                    {row.description || 'No description provided.'}
+                  </div>
+                  <div>
+                    <span className="font-bold text-gray-800">File size: </span>
+                    {row.size || '14.2 KB'}
+                  </div>
+                  <div>
+                    <span className="font-bold text-gray-800">MIME type: </span>
+                    {row.mimeType || 'application/json'}
+                  </div>
+                  <div>
+                    <span className="font-bold text-gray-800">About: </span>
+                    {row.about || 'Dynamic structured context resource for general agent catalog operations.'}
+                  </div>
+                </div>
+              )}
+            />
+          </div>
+        )}
+
+        {/* Tab 4: Prompts */}
+        {activeTab === 'prompts' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4">
+            <SmartTable 
+              data={(server.prompts || []).map((p: any) => ({ ...p, id: p.name }))}
+              columns={[
+                {
+                  key: 'name',
+                  header: 'Name',
+                  sortable: true,
+                  render: (row: any) => <span className="font-mono-custom text-gray-800 font-bold">{row.name}</span>
+                },
+                {
+                  key: 'description',
+                  header: 'Description',
+                  render: (row: any) => <span className="text-gray-550">{row.description}</span>
+                },
+                {
+                  key: 'argCount',
+                  header: 'Arguments',
+                  sortable: true,
+                  render: (row: any) => <span className="font-mono-custom text-gray-600 font-bold">{row.argCount}</span>
+                },
+                {
+                  key: 'actions',
+                  header: 'Action',
+                  render: (row: any) => {
+                    const isItemDisabled = !!row.disabled;
+                    return (
+                      <div className="flex items-center gap-3">
+                        <span className={`text-[10px] font-bold ${isItemDisabled ? 'text-gray-400' : 'text-emerald-600'}`}>
+                          {isItemDisabled ? 'Off' : 'On'}
+                        </span>
+                        <EnableToggle 
+                          checked={!isItemDisabled} 
+                          onChange={() => toggleCapabilityItem(server.id, 'prompts', row.name)}
+                          disabled={!can('toggle-capability', server)}
+                        />
+                        <TestButton name={row.name} kind="prompt" disabled={isItemDisabled} />
+                      </div>
+                    );
+                  }
+                }
+              ]}
+              renderExpanded={(row: any) => {
+                const hasArgs = row.argCount > 0 || (row.args && row.args.length > 0);
+                return (
+                  <div className="space-y-3 text-xs text-gray-600">
+                    <div>
+                      <span className="font-bold text-gray-800">Description: </span>
+                      {row.description || 'No description provided.'}
+                    </div>
+                    {hasArgs && (
+                      <div className="mt-2 space-y-1.5">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-bold text-gray-800">Arguments:</span>
+                          <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-full border border-red-200 bg-red-50 text-red-700">
+                            Arguments required
+                          </span>
+                        </div>
+                        <div className="border border-gray-150 rounded overflow-hidden max-w-md bg-white">
+                          <table className="w-full text-left">
+                            <thead className="bg-gray-50 border-b border-gray-150">
+                              <tr className="text-[10px] font-bold text-gray-400 uppercase">
+                                <th className="px-3 py-1.5">Name</th>
+                                <th className="px-3 py-1.5">Type</th>
+                                <th className="px-3 py-1.5">Required</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 text-[11px]">
+                              {(row.args || [{ name: 'query', type: 'string', required: true }]).map((arg: any) => (
+                                <tr key={arg.name}>
+                                  <td className="px-3 py-1.5 font-mono text-gray-700">{arg.name}</td>
+                                  <td className="px-3 py-1.5 text-gray-500">{arg.type || 'string'}</td>
+                                  <td className="px-3 py-1.5 font-semibold text-gray-700">{arg.required ? 'Yes' : 'No'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }}
+            />
+          </div>
+        )}
+
+        {/* Tab 5: Audit Log */}
+        {activeTab === 'audit-log' && (
+          <div className="space-y-4">
+            {server.auditRecords?.length === 0 ? (
+              <EmptyState description="No compliance logs exist for this server." />
+            ) : (
+              server.auditRecords?.map((record, idx) => (
+                <div 
+                  key={idx} 
+                  onDoubleClick={() => setSelectedAuditRecord(record)}
+                  title="Double click to view configuration diff"
+                  className="bg-white border border-gray-200 rounded-md p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm hover:border-gray-300 cursor-pointer select-none transition-colors"
+                >
+                  <div className="space-y-1.5 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 rounded-full uppercase leading-none">
+                        {record.healthStatus}
+                      </span>
+                      <span className="text-[11px] text-gray-400 font-mono-custom select-all">{record.updatedBy}</span>
+                    </div>
+                    <h4 className="text-xs font-bold text-gray-800">{record.whatChanged}</h4>
+                    <p className="text-xs text-gray-500">{record.remark}</p>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-4 self-end md:self-center">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setSelectedAuditRecord(record); }}
+                      className="text-[11px] text-primary hover:underline font-bold bg-gray-50 px-2.5 py-1 border border-gray-200 rounded cursor-pointer"
+                    >
+                      View changes
+                    </button>
+                    <span className="text-[10px] text-gray-400 font-mono-custom">{new Date(record.editedAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Tab 6: Health status */}
+        {activeTab === 'health-status' && (
+          <div className="space-y-4">
+            <div className="bg-white border border-gray-200 rounded-md p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm select-none">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-gray-800">System Telemetry & Health Verification</h3>
+                <p className="text-xs text-gray-500">Perform real-time status and security scan checklist on the endpoint.</p>
+                {currentUser?.role === 'super_admin' && (
+                  <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={simulateFail} 
+                      onChange={(e) => setSimulateFail(e.target.checked)}
+                      disabled={isCheckingHealth}
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    <span className="text-xs text-red-600 font-semibold">Simulate failing the scan (updates error rate & healthDot to Unhealthy)</span>
+                  </label>
+                )}
+              </div>
+              <button
+                onClick={handleRunHealthCheck}
+                disabled={isCheckingHealth}
+                className={`px-4 py-2 text-xs font-bold rounded cursor-pointer transition-all shrink-0 ${
+                  isCheckingHealth 
+                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-wait'
+                    : 'bg-primary text-primary-foreground hover:opacity-95'
+                }`}
+              >
+                {isCheckingHealth ? 'Running health check...' : 'Run health check'}
+              </button>
             </div>
-          </Card>
 
-          {/* Code Example */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Connection Code Sample</h3>
-            <CopyBlock code={codeExample} />
-          </Card>
-
-          {/* Example Response */}
-          <Card className="bg-card border-border rounded-xl shadow-none overflow-hidden">
-            <CardHeader className="p-5 pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between select-none">
-              <CardTitle className="text-xs font-bold text-foreground uppercase tracking-wider">Response Samples</CardTitle>
-              <SubTabs
-                tabs={[
-                  { key: 'success', label: 'Success' },
-                  { key: 'errors', label: 'Common Errors' },
-                  { key: 'format', label: 'Error Format' }
+            <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm">
+              <SmartTable 
+                data={(server.healthChecks || []).map((hc: any, idx: number) => ({ ...hc, id: idx }))}
+                columns={[
+                  {
+                    key: 'timestamp',
+                    header: 'Timestamp',
+                    render: (row: any) => <span className="font-mono-custom text-gray-550">{new Date(row.timestamp).toLocaleString()}</span>
+                  },
+                  {
+                    key: 'status',
+                    header: 'Status',
+                    render: (row: any) => {
+                      const isHealthy = row.status === 'healthy';
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-bold ${
+                          isHealthy ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isHealthy ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                          {row.status.toUpperCase()}
+                        </span>
+                      );
+                    }
+                  },
+                  {
+                    key: 'performedBy',
+                    header: 'Performed By',
+                    render: (row: any) => <span className="font-mono-custom text-gray-400">{row.performedBy}</span>
+                  },
+                  {
+                    key: 'responseMs',
+                    header: 'Response time',
+                    render: (row: any) => <span className="font-semibold text-gray-700 font-mono-custom">{row.responseMs} ms</span>
+                  }
                 ]}
-                activeTab={responseSubTab}
-                onChange={(key) => setResponseSubTab(key as any)}
               />
-            </CardHeader>
-            <CardContent className="p-5">
-              {responseSubTab === 'success' && <CopyBlock code={successResponse} />}
-              {responseSubTab === 'errors' && <CopyBlock code={commonErrors} />}
-              {responseSubTab === 'format' && <CopyBlock code={errorFormat} />}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {activeTab === 'security' && (
-        <div className="space-y-6">
-          {/* Header Verify Badges */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 select-none flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-foreground">Verified Integration Grade</h3>
-              <p className="text-xs text-muted-foreground">Detailed scan checklist for security clearances.</p>
             </div>
-            <div className="flex items-center gap-2">
-              <VerifiedBadge />
-              <ScanGrade score={server.trust.score} />
-              <span className="inline-flex items-center text-[11px] font-mono font-bold bg-muted border px-2 py-0.5 rounded-full text-foreground">
-                Risk: {(1 - server.trust.score / 100).toFixed(2)}
-              </span>
+          </div>
+        )}
+
+        {/* Tab 7: Integration */}
+        {activeTab === 'integration' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between select-none">
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Client connection snippets</span>
+              <div className="flex border border-gray-200 rounded overflow-hidden shadow-sm shrink-0">
+                <button
+                  onClick={() => setIntegrationLang('ts')}
+                  className={`p-1 px-3 text-xs font-semibold select-none cursor-pointer focus:outline-none ${
+                    integrationLang === 'ts' ? 'bg-primary text-primary-foreground' : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  TypeScript
+                </button>
+                <button
+                  onClick={() => setIntegrationLang('python')}
+                  className={`p-1 px-3 text-xs font-semibold select-none cursor-pointer focus:outline-none ${
+                    integrationLang === 'python' ? 'bg-primary text-primary-foreground' : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Python
+                </button>
+              </div>
             </div>
-          </Card>
 
-          {/* Security audits SmartTable */}
-          <SmartTable
-            columns={[
-              {
-                key: 'rule',
-                header: 'Audit Rule',
-                className: 'font-semibold text-foreground py-2',
-                render: (row) => <span>{row.rule}</span>
-              },
-              {
-                key: 'severity',
-                header: 'Severity',
-                className: 'w-[100px] text-center',
-                render: (row) => {
-                  const isHigh = row.severity === 'High';
-                  return (
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${
-                      isHigh ? 'bg-red-500/10 text-red-600 border-red-500/20' : 'bg-muted text-muted-foreground border-border'
-                    }`}>
-                      {row.severity}
-                    </span>
-                  );
-                }
-              },
-              {
-                key: 'status',
-                header: 'Status',
-                className: 'w-[100px] text-center',
-                render: (row) => {
-                  const pass = row.status === 'pass';
-                  const warn = row.status === 'warn';
-                  return (
-                    <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                      pass ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : warn ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-red-50 text-red-700 border-red-200'
-                    }`}>
-                      <span className={`size-1.5 rounded-full ${pass ? 'bg-emerald-500' : warn ? 'bg-amber-500' : 'bg-red-500'}`} />
-                      <span className="uppercase text-[9px]">{row.status}</span>
-                    </span>
-                  );
-                }
-              },
-              {
-                key: 'detail',
-                header: 'Verification Detail',
-                render: (row) => <span className="text-muted-foreground">{row.detail}</span>
-              }
-            ]}
-            rows={securityRules}
-          />
+            <div className="bg-white border border-gray-200 rounded-md p-5 space-y-3">
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider select-none">Prerequisites</h4>
+              <p className="text-xs text-gray-500">Install the required modelcontextprotocol client library packages:</p>
+              <CopyBlock 
+                code={integrationLang === 'ts' ? `npm install @modelcontextprotocol/sdk` : `pip install mcp`} 
+                language="bash"
+              />
+            </div>
 
-          {/* Declared permissions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3 select-none">
-              <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Declared Sandbox Permissions</h3>
-              <div className="space-y-2">
+            <div className="bg-white border border-gray-200 rounded-md p-5 space-y-3">
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider select-none">Client Connection Code</h4>
+              <CopyBlock 
+                code={integrationLang === 'ts' 
+                  ? `import { Client } from "@modelcontextprotocol/sdk/client/index.js";\nimport { HttpClientTransport } from "@modelcontextprotocol/sdk/client/http.js";\n\nconst transport = new HttpClientTransport({\n  url: "${server.tech?.endpoint || 'http://localhost:8080/mcp'}"\n});\n\nconst client = new Client({\n  name: "custom-reconciler-client",\n  version: "1.0.0"\n});\n\nawait client.connect(transport);\nconsole.log("Connected directly to MCP Server");`
+                  : `import asyncio\nfrom mcp import ClientSession\nfrom mcp.client.http import http_client\n\nasync def run():\n    async with http_client("${server.tech?.endpoint || 'http://localhost:8080/mcp'}") as (read, write):\n        async with ClientSession(read, write) as session:\n            await session.initialize()\n            print("Connection successful!")\n\nasyncio.run(run())`
+                } 
+                language={integrationLang === 'ts' ? 'typescript' : 'python'}
+              />
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-md p-5 space-y-4">
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider select-none">Available API Routes</h4>
+              <div className="divide-y divide-gray-100">
                 {[
-                  { name: 'Network Communications Outbound', allow: true },
-                  { name: 'Environment Variables Reading', allow: false },
-                  { name: 'Local File Directory Access', allow: server.id === 'filesystem-mcp' }
-                ].map((perm, pIdx) => (
-                  <div key={pIdx} className="flex items-center justify-between text-xs py-1 border-b border-border/50 last:border-0">
-                    <span className="font-medium text-foreground">{perm.name}</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase ${
-                      perm.allow
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                        : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
-                    }`}>
-                      {perm.allow ? 'ALLOW' : 'DENY'}
-                    </span>
+                  { m: 'POST', r: 'tools/list', d: 'Query all registered tools payload schema' },
+                  { m: 'POST', r: 'tools/call', d: 'Invoke tool commands inside target server container' },
+                  { m: 'POST', r: 'prompts/list', d: 'Retrieve all configured prompt templates' },
+                  { m: 'POST', r: 'prompts/get', d: 'Access specific compiled prompt variables' },
+                  { m: 'POST', r: 'resources/list', d: 'Query resources schema maps' },
+                  { m: 'POST', r: 'resources/read', d: 'Read raw resource text content' }
+                ].map((api, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-xs py-2 border-b border-gray-100 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className="bg-blue-50 text-blue-700 border border-blue-200 font-bold px-1.5 py-0.5 rounded font-mono-custom text-[10px]">
+                        {api.m}
+                      </span>
+                      <span className="font-mono-custom font-semibold text-gray-700">/{api.r}</span>
+                    </div>
+                    <span className="text-gray-400 text-[11px]">{api.d}</span>
                   </div>
                 ))}
               </div>
-            </Card>
-
-            {/* Auth Posture */}
-            <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3 select-none">
-              <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Authentication Posture</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Connects through OAuth client credentials. Access tokens expire after 3600 seconds and are automatically refreshed. No personal developer keys are stored inside this service context.
-              </p>
-            </Card>
-          </div>
-
-          {/* Scan History */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3 select-none">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Scan Clearance History</h3>
-            <div className="space-y-3 font-mono text-xs">
-              {[
-                { date: '2026-07-01', score: server.trust.score, grade: 'A' },
-                { date: '2026-06-15', score: Math.max(server.trust.score - 2, 70), grade: 'B' },
-                { date: '2026-05-18', score: Math.max(server.trust.score - 4, 70), grade: 'B' }
-              ].map((hist, hIdx) => (
-                <div key={hIdx} className="flex items-center justify-between border-b border-border/40 pb-2 last:border-0 last:pb-0">
-                  <span className="text-muted-foreground">{hist.date}</span>
-                  <div className="flex items-center gap-4">
-                    <span className="text-foreground font-semibold">Score: {hist.score}</span>
-                    <span className="font-sans font-bold bg-primary/10 text-primary px-2 py-0.5 rounded text-[10px]">
-                      GRADE {hist.grade}
-                    </span>
-                  </div>
-                </div>
-              ))}
             </div>
-          </Card>
+          </div>
+        )}
+
+        {/* Tab 8: Security */}
+        {activeTab === 'security' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-3 gap-4 select-none">
+              <StatCard label="Security grade" value={getHealthDisplay(server) === 'Healthy' ? 'A+' : 'C'} subtext={`Scanned score: ${server.trust?.score || 85}`} />
+              <StatCard label="Compliance Status" value="Healthy" subtext="No threat injections caught" />
+              <StatCard label="Sandbox Level" value="Compartment" subtext="No local root writing allowed" />
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-md p-4">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2 select-none">8-Rule Scan Matrix</h3>
+              <SmartTable 
+                data={[
+                  { id: 'esc', rule: 'Sandbox escapes protection', severity: 'High', status: 'pass', detail: 'Prevents reading files outside directory scopes.' },
+                  { id: 'dep', rule: 'Third-party dependencies scans', severity: 'High', status: 'pass', detail: '0 vulnerabilities detected in NPM packages tree.' },
+                  { id: 'net', rule: 'Undeclared network requests checks', severity: 'Medium', status: 'pass', detail: 'Adheres strictly to network bindings.' },
+                  { id: 'sec', rule: 'Hardcoded secrets audit', severity: 'High', status: 'pass', detail: 'No static credentials or api keys found.' },
+                  { id: 'proc', rule: 'Process execution restriction', severity: 'Medium', status: 'pass', detail: 'Spawns are jailed inside client limits.' },
+                  { id: 'mem', rule: 'Memory limits allocation limits', severity: 'Low', status: 'pass', detail: 'Under 100MB runtime buffer usage.' },
+                  { id: 'lic', rule: 'License validation match', severity: 'Low', status: 'pass', detail: 'Permissive MIT matches policies.' },
+                  { id: 'obf', rule: 'Obfuscated logic checks', severity: 'Medium', status: 'pass', detail: 'Zero base64 binary blocks matched.' }
+                ]}
+                columns={[
+                  { key: 'rule', header: 'Compliance rule', render: (row: any) => <span className="font-semibold text-gray-700">{row.rule}</span> },
+                  { key: 'severity', header: 'Severity', render: (row: any) => <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${row.severity === 'High' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{row.severity}</span> },
+                  { key: 'status', header: 'Status', render: () => <span className="text-emerald-700 font-bold uppercase">Pass</span> },
+                  { key: 'detail', header: 'Detail', render: (row: any) => <span className="text-gray-400">{row.detail}</span> }
+                ]}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Tab 9: Version */}
+        {activeTab === 'version' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4">
+            <SmartTable 
+              data={(server.versions || []).map((v: any) => ({ ...v, id: v.version }))}
+              columns={[
+                {
+                  key: 'version',
+                  header: 'Version',
+                  render: (row: any) => <span className="font-mono-custom font-bold text-gray-800">v{row.version}</span>
+                },
+                {
+                  key: 'date',
+                  header: 'Published',
+                  render: (row: any) => <span className="font-mono-custom text-gray-500">{new Date(row.date).toLocaleDateString()}</span>
+                },
+                {
+                  key: 'changelog',
+                  header: 'Changelog Notes',
+                  render: (row: any) => <div className="text-gray-500 prose leading-relaxed max-w-lg" dangerouslySetInnerHTML={{ __html: row.changelog }} />
+                },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  render: (row: any) => <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{row.status.toUpperCase()}</span>
+                },
+                {
+                  key: 'active',
+                  header: 'Active',
+                  render: (row: any) => row.active ? <span className="text-emerald-600 font-bold">Live Active</span> : <span className="text-gray-400">Archived</span>
+                }
+              ]}
+            />
+          </div>
+        )}
+
+      </div>
+
+      {/* Edit Config Modal */}
+      {isEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-md bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <form onSubmit={handleSaveEdit}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-800">Edit Asset Config</h3>
+                <button type="button" onClick={() => setIsEditOpen(false)} className="text-gray-400 font-bold">✕</button>
+              </div>
+              <div className="p-4 space-y-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Asset Name *</label>
+                  <input 
+                    type="text" 
+                    value={editName} 
+                    onChange={e => setEditName(e.target.value)} 
+                    className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Description</label>
+                  <textarea 
+                    value={editDesc} 
+                    onChange={e => setEditDesc(e.target.value)} 
+                    rows={4}
+                    className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
+                <button type="button" onClick={() => setIsEditOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer">Cancel</button>
+                <button type="submit" className="px-3.5 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer">Save Changes</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
-      {activeTab === 'version' && (
-        <VersionsTable
-          versions={[
-            {
-              version: server.version,
-              date: server.updatedAt,
-              notes: 'Regular maintenance and stability improvements.',
-              filesCount: server.tools.length + server.resources.length + server.prompts.length,
-              sizeKb: 14.5,
-              approvalStatus: 'approved'
-            },
-            {
-              version: '1.0.0',
-              date: server.registeredAt,
-              notes: 'Initial registration of MCP capabilities.',
-              filesCount: server.tools.length,
-              sizeKb: 8.2,
-              approvalStatus: 'approved'
-            }
-          ]}
-          currentVersion={server.version}
-          compareEnabled={false}
-        />
-      )}
-
-      {/* Audit Detail Modal */}
-      {selectedAudit && (
-        <Dialog open={!!selectedAudit} onOpenChange={(val) => { if (!val) setSelectedAudit(null); }}>
-          <DialogContent className="sm:max-w-[480px] p-6 bg-card border border-border rounded-xl">
-            <DialogHeader className="mb-4">
-              <DialogTitle className="text-base font-bold text-foreground">Audit Record Detail</DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Registry compliance check logged by platform scanners.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 text-xs select-none">
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Audit ID</span>
-                <span className="font-mono text-foreground">{selectedAudit.id}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Registry Status</span>
-                <span className="font-semibold text-foreground uppercase">{selectedAudit.status}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Updated Action</span>
-                <span className="font-semibold text-foreground">{selectedAudit.whatUpdated}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Updated By</span>
-                <span className="font-mono text-foreground">{selectedAudit.updatedBy}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Timestamp</span>
-                <span className="font-mono text-foreground">{formatDateTime(selectedAudit.date)}</span>
-              </div>
-              <div className="space-y-1 pt-1">
-                <span className="text-muted-foreground font-medium">Auditor Remarks</span>
-                <p className="bg-muted/40 p-2.5 rounded-lg border border-border/30 text-foreground font-sans leading-relaxed">
-                  {selectedAudit.auditorRemark}
-                </p>
-              </div>
+      {/* Delete Direct confirm Dialog (SA-only) */}
+      {isDeleteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-sm bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <div className="p-5 text-center space-y-3">
+              <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto" />
+              <h3 className="text-sm font-bold text-gray-800">Directly Delete MCP Server</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Are you sure you want to delete "{server.name}"? This operation executes immediately and produces a ChangeRecord.
+              </p>
             </div>
-            <div className="flex items-center justify-end mt-6 select-none">
-              <Button
-                onClick={() => setSelectedAudit(null)}
-                className="h-9 px-5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/95"
-              >
-                Close
-              </Button>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-55">
+              <button onClick={() => setIsDeleteOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer text-xs font-semibold">Cancel</button>
+              <button onClick={handleDirectDelete} className="px-3.5 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 cursor-pointer text-xs font-semibold">Delete Directly</button>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
-      {/* EDIT DIALOG */}
-      <EditAssetDialog
-        isOpen={isEditOpen}
-        onOpenChange={setIsEditOpen}
-        kind="server"
-        item={server}
-        onSave={updates => {
-          updateItem('server', server.id, updates);
-        }}
-      />
-
-      {/* DELETE CONFIRM DIALOG */}
-      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-        <DialogContent className="sm:max-w-[420px] p-6 bg-card border border-border rounded-xl select-none">
-          <DialogHeader className="mb-4">
-            <DialogTitle className="text-base font-bold text-foreground">Delete Asset</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Are you sure you want to delete asset "{server.name}"? This action is reversible.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex items-center justify-end gap-2 pt-4">
-            <Button variant="outline" onClick={() => setIsDeleteOpen(false)} className="h-9 text-xs font-semibold rounded-lg">
-              Cancel
-            </Button>
-            <Button onClick={() => {
-              deleteItem('server', server.id);
-              setIsDeleteOpen(false);
-              window.history.back();
-            }} className="h-9 px-5 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-sm">
-              Confirm Delete
-            </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
+
+      {/* Request Deletion confirm Dialog (Owner) */}
+      {isDelReqOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-md bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-800">Submit Deletion Request</h3>
+              <button type="button" onClick={() => setIsDelReqOpen(false)} className="text-gray-400 font-bold">✕</button>
+            </div>
+            <div className="p-4 space-y-3 text-xs">
+              <p className="text-gray-500">Submit a deletion proposal. A Super Admin must audit and approve this delete before execution.</p>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">Reason for Deletion (Optional)</label>
+                <textarea 
+                  value={delReason}
+                  onChange={e => setDelReason(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Server has been decommissioned..."
+                  className="w-full px-2.5 py-1.5 border border-gray-255 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
+              <button onClick={() => setIsDelReqOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer text-xs font-semibold">Cancel</button>
+              <button onClick={handleSubmitDelReq} className="px-3.5 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 cursor-pointer text-xs font-semibold">Submit Request</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Audit Log Diff Viewer Modal */}
+      {selectedAuditRecord && (() => {
+        // Generate deterministic before/after configurations
+        const what = (selectedAuditRecord.whatChanged || '').toLowerCase();
+        let diff = {
+          before: null as any,
+          after: {} as any,
+          changedFields: [] as string[]
+        };
+
+        if (what.includes('health') || what.includes('scan')) {
+          diff = {
+            before: {
+              status: "healthy",
+              uptimePct: 99.8,
+              errorRatePct: 0.05,
+              p95LatencyMs: 14,
+              lastVerified: new Date(new Date(selectedAuditRecord.editedAt).getTime() - 24 * 3600 * 1000).toISOString()
+            },
+            after: {
+              status: "unhealthy",
+              uptimePct: 88.4,
+              errorRatePct: 12.5,
+              p95LatencyMs: 184,
+              lastVerified: selectedAuditRecord.editedAt
+            },
+            changedFields: ['status', 'uptimePct', 'errorRatePct', 'p95LatencyMs', 'lastVerified']
+          };
+        } else if (what.includes('disabled') || what.includes('enabled') || what.includes('toggle')) {
+          const isOff = what.includes('disable') || what.includes('off');
+          diff = {
+            before: {
+              enabled: isOff,
+              updatedAt: new Date(new Date(selectedAuditRecord.editedAt).getTime() - 3600 * 1000).toISOString()
+            },
+            after: {
+              enabled: !isOff,
+              updatedAt: selectedAuditRecord.editedAt
+            },
+            changedFields: ['enabled', 'updatedAt']
+          };
+        } else if (what.includes('registered') || what.includes('create')) {
+          diff = {
+            before: null,
+            after: {
+              name: server.name,
+              version: server.version,
+              status: "pending",
+              visibility: "private"
+            },
+            changedFields: ['name', 'version', 'status', 'visibility']
+          };
+        } else {
+          diff = {
+            before: {
+              description: "Initial workspace configurations and capability profiles.",
+              version: "1.0.0",
+              updatedAt: new Date(new Date(selectedAuditRecord.editedAt).getTime() - 12 * 3600 * 1000).toISOString()
+            },
+            after: {
+              description: server.description,
+              version: server.version,
+              updatedAt: selectedAuditRecord.editedAt
+            },
+            changedFields: ['description', 'version', 'updatedAt']
+          };
+        }
+
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6 backdrop-blur-sm select-none">
+            <div className="bg-white border border-gray-200 rounded-lg shadow-xl max-w-4xl w-full flex flex-col max-h-[85vh] z-50">
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50 rounded-t-lg">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-800">Audit Configuration Diff</h2>
+                  <p className="text-[11px] text-gray-500 mt-0.5 font-semibold font-mono-custom">
+                    {selectedAuditRecord.whatChanged} · Edited by {selectedAuditRecord.updatedBy}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSelectedAuditRecord(null)}
+                  className="text-gray-400 hover:text-gray-600 text-xs font-semibold px-2.5 py-1 border border-gray-250 rounded bg-white cursor-pointer focus:outline-none"
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Side-by-side panels */}
+              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-0 bg-gray-50/20">
+                {/* Before (Red) */}
+                <div className="border border-red-150 rounded-lg bg-red-50/10 p-4 flex flex-col">
+                  <span className="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-3 block">
+                    Before State (- Removed / Old Value)
+                  </span>
+                  {diff.before ? (
+                    <div className="font-mono text-xs text-gray-700 bg-white border border-red-100 rounded p-3 overflow-auto flex-1 select-all">
+                      {Object.entries(diff.before).map(([key, val]) => {
+                        const isChanged = diff.changedFields.includes(key);
+                        return (
+                          <div key={key} className={`py-0.5 px-1 rounded ${isChanged ? 'bg-red-50 text-red-800 font-semibold line-through' : ''}`}>
+                            <span className="text-gray-400">{key}:</span> {String(val)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-xs text-center py-12 bg-white border border-gray-150 rounded flex-1 flex items-center justify-center font-sans">
+                      — No previous state (New Asset Creation) —
+                    </div>
+                  )}
+                </div>
+
+                {/* After (Green) */}
+                <div className="border border-emerald-150 rounded-lg bg-emerald-50/10 p-4 flex flex-col">
+                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-3 block">
+                    After State (+ Added / Modified Value)
+                  </span>
+                  <div className="font-mono text-xs text-gray-700 bg-white border border-emerald-100 rounded p-3 overflow-auto flex-1 select-all">
+                    {Object.entries(diff.after).map(([key, val]) => {
+                      const isChanged = diff.changedFields.includes(key);
+                      return (
+                        <div key={key} className={`py-0.5 px-1 rounded ${isChanged ? 'bg-emerald-50 text-emerald-800 font-bold' : ''}`}>
+                          <span className="text-gray-400">{key}:</span> {String(val)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Footer */}
+              <div className="px-6 py-3 border-t border-gray-150 bg-gray-50/50 flex justify-end rounded-b-lg">
+                <span className="text-[10px] font-mono-custom text-gray-400 self-center">
+                  Timestamp: {new Date(selectedAuditRecord.editedAt).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };

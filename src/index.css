@@ -1,10 +1,10 @@
 @import "tailwindcss";
-@import "@fontsource-variable/geist/index.css";
-@import "@fontsource-variable/geist-mono/index.css";
+@import "@fontsource-variable/inter/index.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
 
 @theme inline {
-  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -32,55 +32,74 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
 
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 }
 
 :root {
-  /* tweakcn light blue and yellow theme with primary oklch corrected to #1e1b54 */
-  --background: oklch(0.99 0 0);
-  --foreground: oklch(0 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0 0 0);
-  --popover: oklch(0.99 0 0);
-  --popover-foreground: oklch(0 0 0);
-  --primary: oklch(0.2657 0.1001 279.46); /* computes to #1e1b54 */
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.94 0 0);
-  --secondary-foreground: oklch(0 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.44 0 0);
-  --accent: oklch(0.94 0 0);
-  --accent-foreground: oklch(0 0 0);
-  --destructive: oklch(0.63 0.19 23.03);
-  --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.92 0 0);
-  --input: oklch(0.94 0 0);
-  --ring: oklch(0.2657 0.1001 279.46);
-  --chart-1: oklch(0.7981 0.0238 288.55);
-  --chart-2: oklch(0.2657 0.1001 279.46);
-  --chart-3: oklch(0.5802 0.0518 287.36);
-  --chart-4: oklch(0.7981 0.0238 288.55);
-  --chart-5: oklch(0.4278 0.0737 284.86);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.99 0 0);
-  --sidebar-foreground: oklch(0 0 0);
-  --sidebar-primary: oklch(0.2657 0.1001 279.46);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.9335 0.0081 293.9);
-  --sidebar-accent-foreground: oklch(0 0 0);
-  --sidebar-border: oklch(0.94 0 0);
-  --sidebar-ring: oklch(0.2657 0.1001 279.46);
+  /* Airtable Apps UI Kit theme colors */
+  --background: oklch(0.975 0.005 80); /* ≈ #f7f7f7 very light warm gray */
+  --foreground: oklch(0.15 0.01 250);
+  --card: oklch(1 0 0); /* Pure White */
+  --card-foreground: oklch(0.15 0.01 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.01 250);
+  
+  --primary: #1e1b54; /* Airtable primary action color */
+  --primary-foreground: #ffffff;
+  
+  --secondary: oklch(0.95 0.005 80);
+  --secondary-foreground: oklch(0.15 0.01 250);
+  --muted: oklch(0.96 0.005 80);
+  --muted-foreground: oklch(0.45 0.01 250);
+  --accent: oklch(0.94 0.01 250);
+  --accent-foreground: oklch(0.15 0.01 250);
+  --destructive: oklch(0.55 0.18 25);
+  --destructive-foreground: #ffffff;
+  --border: oklch(0.90 0.005 80); /* Hairline borders */
+  --input: oklch(0.94 0.005 80);
+  --ring: #1e1b54;
+  
+  --radius: 6px;
+
+  /* Chart Colors */
+  --chart-1: oklch(0.6 0.15 250); /* blue */
+  --chart-2: oklch(0.5 0.15 300); /* purple */
+  --chart-3: oklch(0.6 0.15 170); /* teal */
+  --chart-4: oklch(0.7 0.15 70);  /* orange */
+  --chart-5: oklch(0.6 0.01 250); /* gray */
+
+  /* Categorical color tokens (bg and fg pairs) */
+  --cat-blue-bg: #eff6ff;
+  --cat-blue-fg: #1e40af;
+  
+  --cat-cyan-bg: #ecfeff;
+  --cat-cyan-fg: #0e7490;
+  
+  --cat-teal-bg: #f0fdfa;
+  --cat-teal-fg: #0f766e;
+  
+  --cat-green-bg: #f0fdf4;
+  --cat-green-fg: #166534;
+  
+  --cat-yellow-bg: #fefce8;
+  --cat-yellow-fg: #854d0e;
+  
+  --cat-orange-bg: #fff7ed;
+  --cat-orange-fg: #c2410c;
+  
+  --cat-red-bg: #fef2f2;
+  --cat-red-fg: #991b1b;
+  
+  --cat-pink-bg: #fdf2f8;
+  --cat-pink-fg: #9d174d;
+  
+  --cat-purple-bg: #faf5ff;
+  --cat-purple-fg: #6b21a8;
+  
+  --cat-gray-bg: #f3f4f6;
+  --cat-gray-fg: #374151;
 }
 
 body {
@@ -88,29 +107,75 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   margin: 0;
+  font-size: 13px; /* 13px base UI */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Status utility colors (Fixed style badges & text colors) */
-.badge-status-approved {
-  background-color: var(--color-emerald-50);
-  color: var(--color-emerald-700);
-  border-color: var(--color-emerald-200);
+/* Tabular numbers for metrics */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
-.badge-status-pending {
-  background-color: var(--color-amber-50);
-  color: var(--color-amber-700);
-  border-color: var(--color-amber-200);
+
+/* Mono typography */
+.font-mono-custom {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
 }
-.badge-status-rejected {
-  background-color: var(--color-red-50);
-  color: var(--color-red-700);
-  border-color: var(--color-red-200);
+
+/* Card custom styles: border-only, no shadows */
+.card-border-only {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--card);
+}
+
+/* Floating layer shadows */
+.shadow-floating {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+/* Utility classes for semantic status badges */
+.badge-status-approved, .badge-status-healthy {
+  background-color: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+.badge-status-pending, .badge-status-degraded {
+  background-color: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fef3c7;
+}
+.badge-status-rejected, .badge-status-down {
+  background-color: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fee2e2;
 }
 .badge-status-in_review {
   background-color: #f0f9ff;
   color: #0369a1;
-  border-color: #bae6fd;
+  border: 1px solid #bae6fd;
 }
 
+/* Scan Grade badges */
+.grade-a, .grade-b {
+  background-color: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+.grade-c {
+  background-color: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fef3c7;
+}
+.grade-d, .grade-f {
+  background-color: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fee2e2;
+}
+
+/* Visible focus rings everywhere */
+*:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

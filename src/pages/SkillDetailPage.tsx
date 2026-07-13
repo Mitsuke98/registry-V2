@@ -1,809 +1,901 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRegistry } from '@/data/RegistryContext';
-import { usePageSearch } from '@/context/SearchContext';
-import { useDetailTab } from '@/context/DetailTabContext';
-import { toast } from 'sonner';
-import { ChartCard } from '@/components/registry/ChartCard';
-import { Card } from '@/components/ui/card';
-import { DetailHeader } from '@/components/registry/DetailHeader';
-import { DetailTabs } from '@/components/registry/DetailTabs';
-import { SmartTable } from '@/components/registry/SmartTable';
-import { VersionsTable } from '@/components/registry/VersionsTable';
-import { CompareDialog } from '@/components/registry/CompareDialog';
-import { CopyHashField } from '@/components/registry/CopyHashField';
-import { StatusBadge, RatePopover, BookmarkToggle, EmptyState, VisibilityPopover } from '@/components/registry/UIHelperKit';
-import { Download, Trash2, Send, FileText, ShieldAlert, CheckCircle2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
-import { EditAssetDialog } from '@/components/registry/EditAssetDialog';
-import { Edit } from 'lucide-react';
+  EntityIcon, StatusBadge, HealthDot, RatePopover, BookmarkToggle,
+  EnableToggle, CopyHashField, EmptyState
+} from '@/components/registry/Kit';
+import { SmartTable, CompareDialog, StatCard } from '@/components/registry/Primitives';
+import { 
+  Download, Globe, AlertTriangle, Eye, Edit, ChevronDown, ChevronRight, FolderOpen
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 
 export const SkillDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { skills, currentUser, deleteItem, skillComments, addComment, getUsedBy, can, updateItem, setItemDisabled } = useRegistry();
-  const detailTabContext = useDetailTab();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { 
+    skills, currentUser, bookmarks, toggleBookmark, rateItem,
+    updateItem, setItemDisabled, setItemVisibility, requestDeletion,
+    cancelDeletionRequest, deleteItemDirect, can, workspaces, addComment, getHealthDisplay
+  } = useRegistry();
 
-  const [activeTab, setActiveTabLocal] = useState('overview');
-  const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
-  const [compareOpen, setCompareOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<any | null>(null);
-  const [commentText, setCommentText] = useState('');
+  // Find asset
+  const skill = skills.find(s => s.id === id);
+
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isVisibilityOpen, setIsVisibilityOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDelReqOpen, setIsDelReqOpen] = useState(false);
+  const [delReason, setDelReason] = useState('');
+  
+  // Versions Compare states
+  const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  
+  // File viewer state
+  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
 
-  // Trend Chart range
-  const [trendRange, setTrendRange] = useState<'all' | '30d' | '7d'>('all');
+  // Comment state
+  const [newComment, setNewComment] = useState('');
 
-  const skill = skills.find((s) => s.id === id);
+  // Local state for expanded sections
+  const allVersions = useMemo(() => {
+    const list = [...(skill?.versions || [])];
+    list.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true, sensitivity: 'base' }));
+    return list;
+  }, [skill?.versions]);
 
-  usePageSearch(skill ? `Search in ${skill.name}...` : 'Search skill details...');
+  const getVersionFiles = (v: { version: string; date: string; changelog: string; active: boolean; files?: any[] }) => {
+    if (v.files) return v.files;
+    if (v.active) return skill?.files || [];
+    return [
+      { name: 'SKILL.md', kind: 'markdown', sizeKb: 2.2, createdAt: v.date, updatedAt: v.date, content: `# Skill Version ${v.version}\n\nThis is a mock SKILL.md for version ${v.version}.\n\nChangelog: ${v.changelog}` },
+      { name: 'main.py', kind: 'script', sizeKb: 8.0, createdAt: v.date, updatedAt: v.date, content: `# main.py for version ${v.version}\n# Auto-generated code.` }
+    ];
+  };
+
+  const totalFilesCount = useMemo(() => {
+    let count = 0;
+    allVersions.forEach((v: { version: string; date: string; changelog: string; active: boolean; files?: any[] }) => {
+      count += getVersionFiles(v).length;
+    });
+    return count;
+  }, [allVersions, skill?.files]);
+
+  const activeVersionNum = skill?.versions?.find(v => v.active)?.version || '1.0.0';
+  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({
+    [activeVersionNum]: true
+  });
+
+  const toggleVersionExpanded = (vNum: string) => {
+    setExpandedVersions(prev => ({
+      ...prev,
+      [vNum]: !prev[vNum]
+    }));
+  };
+
+  // Edit Form Fields
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
 
   useEffect(() => {
     if (skill) {
-      detailTabContext?.setActiveTab(activeTab === 'overview' ? '' : activeTab);
+      setEditName(skill.name);
+      setEditDesc(skill.description);
     }
-    return () => {
-      detailTabContext?.setActiveTab('');
-    };
-  }, [activeTab, skill, detailTabContext]);
+  }, [skill]);
+
+  const handleTabChange = (tabKey: string) => {
+    setActiveTab(tabKey);
+    setSearchParams({ tab: tabKey });
+  };
 
   if (!skill) {
     return (
-      <EmptyState
-        message="Skill not found. The skill you are looking for does not exist."
-        actionLabel="Back to Catalog"
-        onAction={() => window.history.back()}
-      />
+      <div className="p-8 text-center">
+        <h2 className="text-sm font-bold text-gray-800">Skill not found.</h2>
+        <button 
+          onClick={() => navigate('/catalog')}
+          className="mt-4 px-3.5 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground cursor-pointer"
+        >
+          Return to Catalog
+        </button>
+      </div>
     );
   }
 
-  const { servers, agents } = getUsedBy(skill.id);
+  const isBookmarked = bookmarks.skill?.includes(skill.id) || false;
+  const isOwner = currentUser?.name === (skill.identity?.ownerName || 'Community');
+  const showEditButton = (isOwner && (skill.status === 'pending' || skill.status === 'in_review')) || (currentUser?.role === 'super_admin');
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
+  // Telemetry chart options
+  const chartData = [
+    { name: '7d ago', downloads: Math.round(skill.downloads * 0.1) },
+    { name: '5d ago', downloads: Math.round(skill.downloads * 0.3) },
+    { name: '3d ago', downloads: Math.round(skill.downloads * 0.6) },
+    { name: 'Today', downloads: skill.downloads }
+  ];
 
-  const formatDateTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const handleDownload = () => {
-    const markdownContent = `# ${skill.name}
-Version: ${skill.version}
-Category: ${skill.category}
-Description: ${skill.description}
-
-## Long Description
-${skill.longDescription}
-
-## Inputs
-${JSON.stringify(skill.inputs, null, 2)}
-
-## Outputs
-${JSON.stringify(skill.outputs, null, 2)}
-`;
-    const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
+  // Blob Download execution
+  const handleDownloadFile = () => {
+    const fileContents = `# Skill Configuration: ${skill.name}\n` +
+      `id: ${skill.id}\n` +
+      `version: ${skill.versions?.[0]?.version || '1.0.0'}\n` +
+      `author: ${skill.identity?.ownerName || 'Community'}\n\n` +
+      `## Description\n${skill.description}\n\n` +
+      `## Requirements\n${skill.requirements?.env?.join('\n') || ''}\n`;
+      
+    const blob = new Blob([fileContents], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${skill.id}-${skill.version}.md`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success(`Downloaded ${skill.id}-${skill.version}.md`);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${skill.id}-v${skill.versions?.[0]?.version || '1.0.0'}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Skill code manifest configuration downloaded.');
   };
 
-  const handleDeleteConfirm = () => {
-    deleteItem('skill', skill.id);
-    toast.error(`Skill "${skill.name}" has been deleted from catalog and workspaces.`);
-    setDeleteOpen(false);
-    window.history.back();
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editName.trim()) {
+      toast.error('Name is required.');
+      return;
+    }
+    updateItem('skill', skill.id, { name: editName, description: editDesc });
+    setIsEditOpen(false);
+  };
+
+  const handleDirectDelete = () => {
+    deleteItemDirect('skill', skill.id);
+    navigate('/catalog');
+    toast.success('Skill deleted.');
+  };
+
+  const handleSubmitDelReq = () => {
+    requestDeletion('skill', skill.id, delReason);
+    setIsDelReqOpen(false);
+  };
+
+  const handleCancelDelReq = () => {
+    cancelDeletionRequest('skill', skill.id);
+  };
+
+  const handleVersionCheck = (ver: string, checked: boolean) => {
+    if (checked) {
+      if (selectedVersions.length >= 2) {
+        toast.warning('Select maximum 2 versions to compare.');
+        return;
+      }
+      setSelectedVersions([...selectedVersions, ver]);
+    } else {
+      setSelectedVersions(selectedVersions.filter(v => v !== ver));
+    }
   };
 
   const handlePostComment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commentText.trim()) return;
-    addComment('skill', skill.id, commentText.trim());
-    setCommentText('');
-    toast.success('Comment posted successfully!');
+    if (!newComment.trim() || !currentUser) return;
+    addComment('skill', skill.id, newComment.trim());
+    setNewComment('');
+    toast.success('Comment posted.');
   };
-
-  // Trend Data based on range selection
-  const trendData = useMemo(() => {
-    const baseValue = skill.downloads;
-    if (trendRange === '7d') {
-      return Array.from({ length: 7 }).map((_, i) => ({
-        name: `Day ${i + 1}`,
-        Downloads: Math.round(baseValue / 30 + Math.random() * 20)
-      }));
-    }
-    if (trendRange === '30d') {
-      return Array.from({ length: 30 }).map((_, i) => ({
-        name: `D${i + 1}`,
-        Downloads: Math.round(baseValue / 12 + Math.random() * 50)
-      }));
-    }
-    // All time (monthly series)
-    return [
-      { name: 'Jan', Downloads: Math.round(baseValue * 0.1) },
-      { name: 'Feb', Downloads: Math.round(baseValue * 0.25) },
-      { name: 'Mar', Downloads: Math.round(baseValue * 0.4) },
-      { name: 'Apr', Downloads: Math.round(baseValue * 0.6) },
-      { name: 'May', Downloads: Math.round(baseValue * 0.75) },
-      { name: 'Jun', Downloads: Math.round(baseValue * 0.9) },
-      { name: 'Jul', Downloads: baseValue }
-    ];
-  }, [skill.downloads, trendRange]);
-
-  // Version List and Content snapshot mock
-  const versionItems = (skill.versions || []).map(v => {
-    let mockContent = `# Skill: ${skill.name} (v${v.version})\n`;
-    if (v.version === '1.2.0' || v.version === skill.version) {
-      mockContent += `Category: ${skill.category}\n\n## Description\n${skill.longDescription}\n\n## Example Snippet\n${skill.exampleSnippet}\n\n## Rules\n1. Ensure strict bounds compliance.\n2. Handle environment configs securely.`;
-    } else {
-      mockContent += `Category: ${skill.category}\n\n## Description\n${skill.description}\n\n## Example Snippet\n// Older signature code snippet.`;
-    }
-    return {
-      ...v,
-      filesCount: skill.files?.length || 1,
-      sizeKb: skill.files?.reduce((acc, f) => acc + f.sizeKb, 0) || 1.5,
-      approvalStatus: 'approved',
-      content: mockContent
-    };
-  });
-
-  const selectedV1 = selectedVersions[0] ? versionItems.find(v => v.version === selectedVersions[0]) : null;
-  const selectedV2 = selectedVersions[1] ? versionItems.find(v => v.version === selectedVersions[1]) : null;
-
-  const compareButtonDisabled = selectedVersions.length !== 2;
-
-  // Filter comments
-  const comments = skillComments[skill.id] || [];
-
-  // Rules Catalog list
-  const scanCatalogRules = [
-    { rule: 'Exec Calls Check', severity: 'High', detail: 'Flagged symbols: eval, exec, compile, __import__' },
-    { rule: 'Shell Command Check', severity: 'High', detail: 'Flagged symbols: subprocess, os.system, os.popen' },
-    { rule: 'Env Variable Check', severity: 'High', detail: 'Flagged symbols: os.environ without declarations' },
-    { rule: 'File Mutation Check', severity: 'Medium', detail: 'Flagged: open(..., "w"), shutil, rm -rf, os.remove' },
-    { rule: 'Undeclared Network', severity: 'Medium', status: 'pass', detail: 'Blocks requests/urllib/socket when network: false' },
-    { rule: 'Base64 Obfuscation', severity: 'Medium', detail: 'Flags base64 strings > 200 chars or \\x escapes > 100' },
-    { rule: 'Credentials Leaks', severity: 'Low', detail: 'Checks for sk-..., ghp_..., AKIA..., or password =' },
-    { rule: 'File Payload Check', severity: 'Low', detail: 'Flags body size exceeding 50 KB' }
-  ];
-
-  // Dynamic Findings based on trust score
-  const scanFindings = useMemo(() => {
-    if (skill.trust.score >= 70) return [];
-    return [
-      { rule: 'Exec Calls Check', severity: 'High', detail: 'Detected evaluate() block inside main interface script.' },
-      { rule: 'File Mutation Check', severity: 'Medium', detail: 'Uses open(..., "w") on temporary config paths.' }
-    ];
-  }, [skill.trust.score]);
-
-  // Formats file markdown preview beautifully
-  const renderMarkdownPreview = (text: string) => {
-    const lines = text.split('\n');
-    return (
-      <div className="space-y-2 text-xs leading-relaxed text-foreground select-text">
-        {lines.map((line, idx) => {
-          if (line.startsWith('# ')) {
-            return <h1 key={idx} className="text-base font-bold border-b border-border/40 pb-1 mt-3">{line.replace('# ', '')}</h1>;
-          }
-          if (line.startsWith('## ')) {
-            return <h2 key={idx} className="text-sm font-semibold mt-2">{line.replace('## ', '')}</h2>;
-          }
-          if (line.startsWith('- ')) {
-            return <li key={idx} className="list-disc ml-4">{line.replace('- ', '')}</li>;
-          }
-          if (line.trim() === '') {
-            return <div key={idx} className="h-1" />;
-          }
-          // Bold replacement
-          let content = line;
-          const boldRegex = /\*\*(.*?)\*\*/g;
-          const parts = [];
-          let lastIndex = 0;
-          let match;
-          while ((match = boldRegex.exec(content)) !== null) {
-            parts.push(content.substring(lastIndex, match.index));
-            parts.push(<strong key={match.index} className="font-bold text-foreground">{match[1]}</strong>);
-            lastIndex = boldRegex.lastIndex;
-          }
-          parts.push(content.substring(lastIndex));
-          return <p key={idx}>{parts.length > 1 ? parts : line}</p>;
-        })}
-      </div>
-    );
-  };
-
-  const handleSelectVersion = (version: string) => {
-    setSelectedVersions(prev => {
-      if (prev.includes(version)) {
-        return prev.filter(v => v !== version);
-      }
-      if (prev.length >= 2) {
-        return prev;
-      }
-      return [...prev, version];
-    });
-  };
-
-  const tabsConfig = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'version', label: 'Version' },
-    { key: 'files', label: 'Files' },
-    { key: 'scan', label: 'Scan' },
-    { key: 'audit', label: 'Audit' },
-    { key: 'comments', label: 'Comments' }
-  ];
 
   return (
-    <div className="space-y-6">
-      {/* Detail Header */}
-      <DetailHeader
-        iconName={skill.iconName || 'shield'}
-        name={skill.name}
-        badgeCluster={
-          <>
-            <StatusBadge status={skill.status} />
-            {skill.disabled && (
-              <span className="text-[10px] font-bold border border-red-500/20 bg-red-500/5 text-red-600 px-1.5 py-0.5 rounded uppercase leading-none">
-                Disabled
-              </span>
-            )}
-            <span className="inline-flex items-center text-[11px] font-semibold text-primary bg-primary/5 px-2.5 py-0.5 rounded-full border border-primary/20">
-              Confidence {skill.trust.score}/100
-            </span>
-          </>
-        }
-        description={skill.description}
-        metaLine={
-          <>
-            <span className="font-mono">{skill.ownerName}@registry.org</span>
-            <span>·</span>
-            <span>{skill.files?.length || 1} files in download</span>
-            <span>·</span>
-            <span>Updated {formatDate(skill.registeredAt)}</span>
-          </>
-        }
-        tags={[]}
-        actionSlot={
-          <>
-            <BookmarkToggle kind="skill" id={skill.id} />
-            <RatePopover kind="skill" id={skill.id} />
-            <VisibilityPopover kind="skill" id={skill.id} />
-
-            {can('edit', skill) && (
-              <Button variant="outline" onClick={() => setIsEditOpen(true)} className="h-9 text-xs font-semibold gap-1.5 cursor-pointer">
-                <Edit className="size-3.5" />
-                <span>Edit</span>
-              </Button>
-            )}
-
-            {can('delete', skill) && (
-              <Button variant="destructive" onClick={() => setDeleteOpen(true)} className="h-9 text-xs font-semibold gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer">
-                <Trash2 className="size-3.5" />
-                <span>Delete</span>
-              </Button>
-            )}
-
-            {can('toggle-disabled', skill) && (
-              <div className="flex items-center gap-2 border border-border rounded-lg px-3 h-9 bg-background select-none">
-                <span className="text-xs text-muted-foreground font-semibold">Enabled</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={!skill.disabled}
-                    onChange={() => setItemDisabled('skill', skill.id, !skill.disabled)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-8 h-4 bg-muted/80 rounded-full peer peer-focus:ring-1 peer-focus:ring-primary/20 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary relative"></div>
-                </label>
-              </div>
-            )}
-
-            <button
-              onClick={handleDownload}
-              className="h-9 px-4 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/95 rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
-            >
-              <Download className="size-4" />
-              <span>Download</span>
-            </button>
-          </>
-        }
-      />
-
-      {/* Detail Tabs with right slot Compare button */}
-      <DetailTabs
-        tabs={tabsConfig}
-        activeTab={activeTab}
-        onChange={setActiveTabLocal}
-        rightAction={
-          activeTab === 'version' ? (
-            <button
-              disabled={compareButtonDisabled}
-              onClick={() => setCompareOpen(true)}
-              className="h-8 px-4 rounded-lg bg-primary text-primary-foreground text-xs font-bold shadow-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              Compare ({selectedVersions.length}/2)
-            </button>
-          ) : undefined
-        }
-      />
-
-      {/* Tabs Viewports */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              {/* Frontmatter card */}
-              <Card className="p-5 bg-card border-border rounded-xl shadow-none space-y-3">
-                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider select-none">Skill Specification</h3>
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <dt className="text-muted-foreground font-semibold mb-1">Declared Author</dt>
-                    <dd className="text-foreground">{skill.ownerName}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground font-semibold mb-1">Roles / Scope</dt>
-                    <dd className="text-foreground">Developer Assistant, Agent Executor</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground font-semibold mb-1">Target Entities</dt>
-                    <dd className="text-foreground">Filesystem, Local Code Repositories</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground font-semibold mb-1">Network Declared</dt>
-                    <dd className="font-semibold text-red-600">Blocked (Offline Sandboxing)</dd>
-                  </div>
-                </dl>
-              </Card>
-
-              {/* Description */}
-              <Card className="p-5 bg-card border-border rounded-xl shadow-none space-y-2">
-                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider select-none">Overview</h3>
-                <p className="text-[13.5px] text-muted-foreground leading-relaxed">
-                  {skill.longDescription}
-                </p>
-              </Card>
-
-              {/* Examples */}
-              <Card className="p-5 bg-card border-border rounded-xl shadow-none space-y-2">
-                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider select-none">Usage Example</h3>
-                <pre className="bg-muted p-4 rounded-lg font-mono text-[12px] overflow-auto select-all leading-relaxed whitespace-pre max-h-[300px] border border-border/40 text-foreground">
-                  {skill.exampleSnippet}
-                </pre>
-              </Card>
-            </div>
-
-            <div className="space-y-6">
-              {/* Downloads trend AreaChart */}
-              <Card className="p-5 bg-card border-border rounded-xl shadow-none space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-foreground uppercase tracking-wider select-none">Downloads Trend</h3>
-                  <div className="flex items-center gap-1 p-0.5 rounded bg-muted/65">
-                    {(['all', '30d', '7d'] as const).map(range => (
-                      <button
-                        key={range}
-                        onClick={() => setTrendRange(range)}
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded transition-all cursor-pointer ${
-                          trendRange === range ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-                        }`}
-                      >
-                        {range === 'all' ? 'All' : range}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <ChartCard
-                  type="area"
-                  title=""
-                  data={trendData}
-                  series={[{ key: 'Downloads', stroke: 'oklch(0.2657 0.1001 279.46)' }]}
-                />
-              </Card>
-
-              {/* Content Hash Field */}
-              <Card className="p-5 bg-card border-border rounded-xl shadow-none space-y-3">
-                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider select-none">Content Hash (SHA-256)</h3>
-                <CopyHashField value="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" />
-              </Card>
-
-              {/* Requirements & Declared Values */}
-              <Card className="p-5 bg-card border-border rounded-xl shadow-none space-y-3">
-                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider select-none">Resource Requirements</h3>
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center justify-between py-1 border-b border-border/40">
-                    <span className="text-muted-foreground">Local System Access</span>
-                    <span className="font-semibold text-foreground">ReadOnly Files</span>
-                  </div>
-                  <div className="flex items-center justify-between py-1 border-b border-border/40">
-                    <span className="text-muted-foreground">Process Spawn Allowed</span>
-                    <span className="font-semibold text-red-600">DENIED</span>
-                  </div>
-                  <div className="flex items-center justify-between py-1">
-                    <span className="text-muted-foreground">Required Node Version</span>
-                    <span className="font-mono text-foreground font-semibold">&gt;=18.0.0</span>
-                  </div>
-                </div>
-              </Card>
-            </div>
+    <div className="relative select-none pb-12">
+      
+      {/* Sticky Detail Header on scroll */}
+      <div className="sticky top-0 bg-white/95 border-b border-gray-200 px-6 py-3 flex items-center justify-between z-20 backdrop-blur-sm">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <EntityIcon kind="skill" size="sm" />
+          <div className="min-w-0">
+            <h1 className="text-xs font-bold text-gray-800 truncate">{skill.name}</h1>
+            <p className="text-[10px] text-gray-400 mt-0.5 truncate font-mono-custom">v{skill.versions?.[0]?.version || '1.0.0'} · {skill.identity?.ownerName || 'Community'}</p>
           </div>
-
-          {/* Used By row */}
-          <div className="pt-2 select-none">
-            <h3 className="text-sm font-bold text-foreground mb-3">Referenced In Catalog</h3>
-            {servers.length === 0 && agents.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground italic">This skill is currently not referenced by any registry servers or agents.</p>
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                {servers.map((s) => (
-                  <Link
-                    key={s.id}
-                    to={`/servers/${s.id}?tab=overview`}
-                    className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full text-[12px] bg-card hover:bg-accent hover:border-foreground/20 text-foreground transition-all border-border"
-                  >
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Server</span>
-                    <span className="font-medium">{s.name}</span>
-                  </Link>
-                ))}
-                {agents.map((a) => (
-                  <Link
-                    key={a.id}
-                    to={`/agents/${a.id}?tab=overview`}
-                    className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full text-[12px] bg-card hover:bg-accent hover:border-foreground/20 text-foreground transition-all border-border"
-                  >
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Agent</span>
-                    <span className="font-medium">{a.name}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
+          <div className="flex gap-1.5 items-center shrink-0">
+            <StatusBadge status={skill.status} disabled={skill.disabled} deletionRequested={skill.deletionRequested} />
+            <HealthDot status={getHealthDisplay(skill)} showLabel />
           </div>
         </div>
-      )}
 
-      {activeTab === 'version' && (
-        <VersionsTable
-          versions={versionItems}
-          currentVersion={skill.version}
-          compareEnabled={true}
-          selectedVersions={selectedVersions}
-          onSelectVersion={handleSelectVersion}
-        />
-      )}
+        {/* Action Controls */}
+        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          
+          <button 
+            onClick={handleDownloadFile}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer focus:outline-none"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download MD
+          </button>
 
-      {activeTab === 'files' && (
-        <SmartTable
-          searchPlaceholder="Search files..."
-          searchKeys={['name', 'kind']}
-          columns={[
-            {
-              key: 'name',
-              header: 'File Name',
-              className: 'font-mono text-primary font-semibold select-all py-2 cursor-pointer hover:underline',
-              render: (row) => (
-                <button
-                  onClick={() => setSelectedFile(row)}
-                  className="inline-flex items-center gap-2 text-left font-mono text-primary hover:underline cursor-pointer"
-                >
-                  <FileText className="size-4 text-muted-foreground/80 shrink-0" />
-                  <span>{row.name}</span>
-                </button>
-              )
-            },
-            {
-              key: 'kind',
-              header: 'Kind',
-              className: 'w-[140px]',
-              render: (row) => (
-                <span className="inline-flex text-[9.5px] uppercase font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded border border-border/45">
-                  {row.kind}
-                </span>
-              )
-            },
-            {
-              key: 'sizeKb',
-              header: 'Size',
-              className: 'w-[120px] font-mono text-center tabular-nums',
-              render: (row) => <span>{row.sizeKb.toFixed(1)} KB</span>
-            },
-            {
-              key: 'updatedAt',
-              header: 'Last Updated',
-              className: 'w-[160px] font-mono text-right pr-4',
-              render: (row) => <span>{row.updatedAt}</span>
-            }
-          ]}
-          rows={skill.files || []}
-        />
-      )}
+          <BookmarkToggle isBookmarked={isBookmarked} onToggle={() => toggleBookmark('skill', skill.id)} />
+          <RatePopover itemId={skill.id} currentRating={skill.rating} onRate={(r) => rateItem('skill', skill.id, r)} />
+          
+          {/* Enable/Disable Switch (Owner/SA) */}
+          {can('toggle-disabled', skill) && (
+            <div className="flex items-center gap-2 border border-gray-200 rounded px-2.5 py-1 bg-white text-xs select-none">
+              <span className="text-[11px] font-semibold text-gray-500">Enabled</span>
+              <EnableToggle checked={!skill.disabled} onChange={(checked) => setItemDisabled('skill', skill.id, !checked)} />
+            </div>
+          )}
 
-      {activeTab === 'scan' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 select-none">
-            {/* Risk score card */}
-            <Card className="bg-card border-border rounded-xl shadow-none p-5 flex flex-col justify-between">
-              <div>
-                <div className="text-[12px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">Clearance Score</div>
-                <div className="text-3xl font-extrabold text-foreground tracking-tight select-all">
-                  {skill.trust.score}<span className="text-xs font-normal text-muted-foreground">/100</span>
-                </div>
-              </div>
-              <div className="text-[10px] text-muted-foreground/80 pt-4 border-t border-border/45">
-                Note: Flag threshold setting is &ge; 0.70 risk index.
-              </div>
-            </Card>
-
-            {/* Severity rule Catalog */}
-            <Card className="bg-card border-border rounded-xl shadow-none p-0 md:col-span-2 overflow-hidden">
-              <Table border-0 className="text-xs">
-                <TableHeader className="bg-muted/40 border-b border-border/60">
-                  <TableRow className="h-8">
-                    <TableHead className="font-bold text-foreground">Rule</TableHead>
-                    <TableHead className="font-bold text-foreground w-[100px] text-center">Severity</TableHead>
-                    <TableHead className="font-bold text-foreground">Detections</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {scanCatalogRules.map((rule, idx) => (
-                    <TableRow key={idx} className="h-9 border-b border-border/40 last:border-0">
-                      <TableCell className="font-semibold text-foreground py-1">{rule.rule}</TableCell>
-                      <TableCell className="py-1 text-center">
-                        <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded border uppercase ${
-                          rule.severity === 'High'
-                            ? 'bg-red-500/10 text-red-600 border-red-500/20'
-                            : rule.severity === 'Medium'
-                              ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
-                              : 'bg-muted text-muted-foreground border-border'
-                        }`}>
-                          {rule.severity}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground py-1 truncate max-w-[200px]" title={rule.detail}>
-                        {rule.detail}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          </div>
-
-          {/* Findings card */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider mb-3 select-none">Automated Security Findings</h3>
-            {scanFindings.length === 0 ? (
-              <div className="py-4 text-center select-none">
-                <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg font-bold">
-                  <CheckCircle2 className="size-4" />
-                  <span>No findings detected. Code meets security criteria.</span>
-                </span>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {scanFindings.map((find, idx) => (
-                  <div key={idx} className="p-3 border border-red-500/20 bg-red-500/[0.02] rounded-lg flex items-start gap-3">
-                    <ShieldAlert className="size-4 text-red-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="text-xs font-bold text-red-700 dark:text-red-400">{find.rule}</h4>
-                      <p className="text-xs text-red-600/80 dark:text-red-400/80 mt-1">{find.detail}</p>
+          {/* Visibility Popover (Owner/SA) */}
+          {can('set-visibility', skill) && (
+            <div className="relative">
+              <button 
+                onClick={() => setIsVisibilityOpen(!isVisibilityOpen)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-55 cursor-pointer focus:outline-none"
+              >
+                <Globe className="w-3.5 h-3.5 text-gray-505" />
+                Visibility
+              </button>
+              {isVisibilityOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsVisibilityOpen(false)}></div>
+                  <div className="absolute right-0 mt-1.5 w-64 bg-white border border-gray-200 rounded-md p-4 shadow-floating z-50">
+                    <h4 className="text-xs font-bold text-gray-800 mb-2.5 border-b pb-1.5">Visibility settings</h4>
+                    
+                    <div className="flex items-center justify-between text-xs mb-3">
+                      <span className="font-semibold text-gray-600">Public (Global)</span>
+                      <input 
+                        type="checkbox" 
+                        checked={skill.visibility?.global || false} 
+                        onChange={(e) => setItemVisibility('skill', skill.id, {
+                          global: e.target.checked,
+                          workspaceIds: skill.visibility?.workspaceIds || []
+                        })}
+                        className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                      />
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
-
-      {activeTab === 'audit' && (
-        <SmartTable
-          searchPlaceholder="Search audit events..."
-          searchKeys={['action', 'user', 'details']}
-          columns={[
-            {
-              key: 'action',
-              header: 'Action',
-              className: 'w-[130px] py-2',
-              render: (row) => {
-                const act = row.action.toLowerCase();
-                let colorClass = 'bg-muted text-muted-foreground border-border';
-                if (act === 'approved') {
-                  colorClass = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
-                } else if (act === 'scanned') {
-                  colorClass = 'bg-primary/10 text-primary border-primary/20';
-                }
-                return (
-                  <span className={`inline-flex text-[9.5px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wide ${colorClass}`}>
-                    {row.action}
-                  </span>
-                );
-              }
-            },
-            {
-              key: 'user',
-              header: 'Auditor User',
-              className: 'font-mono text-muted-foreground select-all',
-              render: (row) => <span>{row.user}</span>
-            },
-            {
-              key: 'details',
-              header: 'Details',
-              render: (row) => <span className="font-semibold text-foreground">{row.details}</span>
-            },
-            {
-              key: 'when',
-              header: 'When',
-              className: 'w-[160px] font-mono text-right pr-4',
-              render: (row) => <span>{formatDateTime(row.when)}</span>
-            }
-          ]}
-          rows={skill.auditLogs || []}
-        />
-      )}
-
-      {activeTab === 'comments' && (
-        <div className="space-y-6 select-none">
-          <Card className="bg-card border-border rounded-xl shadow-none p-5">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider mb-4">Registry Discussions</h3>
-
-            {comments.length === 0 ? (
-              <div className="py-8 text-center border border-dashed border-border/80 rounded-xl text-xs text-muted-foreground mb-4">
-                No comments posted yet. Start the discussion below.
-              </div>
-            ) : (
-              <div className="space-y-4 mb-6 divide-y divide-border/40">
-                {comments.map((comm, idx) => (
-                  <div key={idx} className={`flex gap-3 text-xs ${idx > 0 ? 'pt-4' : ''}`}>
-                    <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold font-sans">
-                      {comm.initials}
-                    </div>
-                    <div className="space-y-1 min-w-0 flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-foreground">{comm.author}</span>
-                        <span className="font-mono text-[10px] text-muted-foreground">{formatDateTime(comm.date)}</span>
+                    
+                    <div className="space-y-1.5">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Workspaces Share</span>
+                      <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                        {workspaces.map(ws => {
+                          const isChecked = skill.visibility?.workspaceIds?.includes(ws.id) || false;
+                          return (
+                            <label key={ws.id} className="flex items-center gap-2 text-xs p-1 hover:bg-gray-50 rounded cursor-pointer">
+                              <input 
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  const list = skill.visibility?.workspaceIds || [];
+                                  const nextList = e.target.checked 
+                                    ? [...list, ws.id]
+                                    : list.filter(wId => wId !== ws.id);
+                                  setItemVisibility('skill', skill.id, {
+                                    global: skill.visibility?.global || false,
+                                    workspaceIds: nextList
+                                  });
+                                }}
+                                className="rounded border-gray-300 text-primary focus:ring-primary"
+                              />
+                              <span className="truncate font-semibold text-gray-700">{ws.name}</span>
+                            </label>
+                          );
+                        })}
                       </div>
-                      <p className="text-muted-foreground leading-relaxed whitespace-pre-wrap">{comm.text}</p>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-
-            <form onSubmit={handlePostComment} className="flex gap-3">
-              <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold font-sans shrink-0">
-                {currentUser?.initials || 'AV'}
-              </div>
-              <div className="flex-1 space-y-3">
-                <textarea
-                  value={commentText}
-                  onChange={e => setCommentText(e.target.value)}
-                  placeholder="Post a reply or review check comments..."
-                  rows={3}
-                  className="w-full rounded-lg border border-border bg-muted/20 p-3 text-xs focus:outline-none focus:border-primary/50 text-foreground"
-                />
-                <div className="flex justify-end">
-                  <Button
-                    type="submit"
-                    className="h-8 px-4 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/95 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Send className="size-3" />
-                    <span>Post Comment</span>
-                  </Button>
-                </div>
-              </div>
-            </form>
-          </Card>
-        </div>
-      )}
-
-      {/* Compare Version Dialog */}
-      {selectedV1 && selectedV2 && (
-        <CompareDialog
-          open={compareOpen}
-          onOpenChange={setCompareOpen}
-          v1Name={`v${selectedV1.version}`}
-          v2Name={`v${selectedV2.version}`}
-          v1Content={selectedV1.content || ''}
-          v2Content={selectedV2.content || ''}
-        />
-      )}
-
-      {/* Delete Item Confirmation Dialog */}
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="sm:max-w-[420px] p-6 bg-card border border-border rounded-xl select-none">
-          <DialogHeader className="mb-4">
-            <DialogTitle className="text-base font-bold text-foreground">Confirm Delete Skill</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Are you absolutely sure you want to delete this skill? This will remove it from all workspace registries permanently.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center justify-end gap-2 mt-6">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteOpen(false)}
-              className="h-9 px-4 text-xs font-semibold rounded-lg"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleDeleteConfirm}
-              className="h-9 px-4 text-xs font-semibold rounded-lg bg-red-600 text-white hover:bg-red-500 flex items-center gap-1.5"
-            >
-              <Trash2 className="size-3.5" />
-              <span>Confirm Delete</span>
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* File Viewer Dialog */}
-      {selectedFile && (
-        <Dialog open={!!selectedFile} onOpenChange={(val) => { if (!val) setSelectedFile(null); }}>
-          <DialogContent className="sm:max-w-[640px] w-full max-h-[80vh] flex flex-col p-6 bg-card border border-border rounded-xl">
-            <DialogHeader className="mb-3 select-none">
-              <DialogTitle className="text-base font-bold text-foreground">
-                File Viewer: {selectedFile.name}
-              </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Preview file source content inside this skill registration package.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex-1 overflow-auto border border-border/80 rounded-lg bg-muted/20 p-4 font-mono text-[12px] leading-relaxed max-h-[50vh]">
-              {selectedFile.kind === 'markdown' ? (
-                renderMarkdownPreview(
-                  selectedFile.name === 'SKILL.md'
-                    ? `# ${skill.name} Spec\n\nVersion: ${skill.version}\nCategory: ${skill.category}\n\n## Overview\n${skill.longDescription}\n\n## When to Use\n${skill.whenToUse.map(w => `- ${w}`).join('\n')}\n\n## Code Signature\n\`\`\`javascript\n${skill.exampleSnippet}\n\`\`\``
-                    : `# Raw markdown preview`
-                )
-              ) : (
-                <pre className="select-all text-foreground">
-                  {selectedFile.name === 'detector.ts'
-                    ? `export class AnomalyDetector {\n  private threshold: number;\n  constructor(opts: { threshold: number }) {\n    this.threshold = opts.threshold;\n  }\n  addDataPoint(p: number) {\n    // ...\n  }\n  isAnomaly(val: number): boolean {\n    return val > this.threshold * 100;\n  }\n}`
-                    : `// JavaScript/TypeScript/JSON code source body preview\nconsole.log("Mock file details.");`}
-                </pre>
+                </>
               )}
             </div>
-            <div className="flex justify-end pt-4 select-none">
-              <Button
-                onClick={() => setSelectedFile(null)}
-                className="h-9 px-5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/95"
+          )}
+
+          {/* Edit (Owner conditionally/SA always) */}
+          {showEditButton && (
+            <button
+              onClick={() => setIsEditOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
+            >
+              <Edit className="w-3.5 h-3.5" />
+              Edit
+            </button>
+          )}
+
+          {/* Disabled Delete Button */}
+          <button
+            disabled
+            className="px-2.5 py-1 text-xs font-semibold rounded bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+            title="Deletions must be requested — use Request deletion"
+          >
+            Delete
+          </button>
+
+          {/* Actionable deletion requests for Owner only */}
+          {isOwner && (
+            skill.deletionRequested ? (
+              <button
+                onClick={handleCancelDelReq}
+                className="px-2.5 py-1 text-xs font-semibold rounded bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 cursor-pointer focus:outline-none"
               >
-                Close Preview
-              </Button>
+                Cancel Deletion
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsDelReqOpen(true)}
+                className="px-2.5 py-1 text-xs font-semibold rounded bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer focus:outline-none"
+              >
+                Request Deletion
+              </button>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* 7 Detail Tabs Strip */}
+      <div className="px-6 border-b border-gray-200 bg-white select-none">
+        <div className="flex items-center gap-6 overflow-x-auto">
+          {[
+            { key: 'overview', label: 'Overview' },
+            { key: 'version', label: 'Version history' },
+            { key: 'changelog', label: 'Changelog' },
+            { key: 'files', label: `Files (${totalFilesCount})` },
+            { key: 'scan', label: 'Security risk check' },
+            { key: 'audit', label: 'Audit trail' },
+            { key: 'comments', label: `Comments (${skill.comments?.length || 0})` }
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => handleTabChange(tab.key)}
+              className={`py-3 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap focus:outline-none ${
+                activeTab === tab.key 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-gray-505 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Contents */}
+      <div className="p-6">
+        
+        {/* Tab 1: Overview */}
+        {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+            
+            {/* Frontmatter card */}
+            <div className="lg:col-span-2 space-y-6">
+              
+              <div className="bg-white border border-gray-200 rounded-md p-5 space-y-4">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 select-none font-mono">Frontmatter Metadata</h3>
+                
+                <div className="border border-gray-150 rounded bg-gray-50 p-4 font-mono-custom text-xs text-gray-700 space-y-1.5">
+                  <div>name: {skill.name}</div>
+                  <div>version: {skill.versions?.[0]?.version || '1.0.0'}</div>
+                  <div>sandbox: {JSON.stringify(skill.requirements || {})}</div>
+                  <div>network: {skill.requirements?.network ? 'true' : 'false'}</div>
+                  <div>category: {skill.category}</div>
+                </div>
+
+                <div className="space-y-1 pt-1.5">
+                  <span className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">Secure hash signature</span>
+                  <CopyHashField hash={skill.contentHash || 'SHA-256: 4f18db0d38b5ef194a2b97c413b1f5e2777174e2d31f0b0938b'} />
+                </div>
+              </div>
+
+              {/* Downloads Trend Chart */}
+              <div className="bg-white border border-gray-200 rounded-md p-5">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 select-none">Skill Downloads Trend</h3>
+                <div className="h-44 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" stroke="#9ca3af" fontSize={10} tickLine={false} />
+                      <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="downloads" stroke="var(--chart-3)" fill="var(--chart-3)" fillOpacity={0.08} strokeWidth={1.5} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
-          </DialogContent>
-        </Dialog>
+
+            {/* Requirements & Info Column */}
+            <div className="space-y-6">
+              
+              {/* Python runtime packages card */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 space-y-3">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider font-mono">Python Package Requirements</h3>
+                {(skill.requirements?.env || []).length === 0 ? (
+                  <span className="text-xs text-gray-400 font-medium">No external package dependencies required.</span>
+                ) : (
+                  <div className="space-y-1.5">
+                    {skill.requirements?.env?.map((req: any) => (
+                      <div key={req} className="font-mono-custom text-xs text-gray-600 bg-gray-50 border p-1 px-2.5 rounded truncate select-all">
+                        {req}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Identity details */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 space-y-3.5">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider font-mono">Identity info</h3>
+                <dl className="space-y-2.5 text-xs">
+                  <div className="flex justify-between border-b pb-1.5">
+                    <dt className="text-gray-400 font-medium">ID slug</dt>
+                    <dd className="font-mono text-gray-700">{skill.id}</dd>
+                  </div>
+                  <div className="flex justify-between border-b pb-1.5">
+                    <dt className="text-gray-400 font-medium">Owner</dt>
+                    <dd className="font-semibold text-gray-700">{skill.identity?.ownerName || 'Community'}</dd>
+                  </div>
+                  <div className="flex justify-between border-b pb-1.5">
+                    <dt className="text-gray-400 font-medium">Rating score</dt>
+                    <dd className="font-semibold text-gray-700">★ {skill.rating.toFixed(1)} ({skill.reviewsCount} votes)</dd>
+                  </div>
+                  <div className="flex justify-between pb-0">
+                    <dt className="text-gray-400 font-medium">Category</dt>
+                    <dd className="font-bold text-gray-700 uppercase">{skill.category}</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Version history */}
+        {activeTab === 'version' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4 space-y-4">
+            
+            <div className="flex justify-between items-center select-none pb-2 border-b">
+              <span className="text-xs text-gray-400 font-bold uppercase font-mono">Version compare list</span>
+              {selectedVersions.length === 2 && (
+                <button
+                  onClick={() => setIsCompareOpen(true)}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer focus:outline-none"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Compare Diff
+                </button>
+              )}
+            </div>
+
+            <SmartTable 
+              data={(skill.versions || []).map((v: any) => ({ ...v, id: v.version }))}
+              columns={[
+                {
+                  key: 'compare',
+                  header: 'Compare',
+                  render: (row: any) => (
+                    <input 
+                      type="checkbox"
+                      checked={selectedVersions.includes(row.version)}
+                      onChange={(e) => handleVersionCheck(row.version, e.target.checked)}
+                      className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                    />
+                  )
+                },
+                {
+                  key: 'version',
+                  header: 'Version',
+                  render: (row: any) => <span className="font-mono-custom font-bold text-gray-800">v{row.version}</span>
+                },
+                {
+                  key: 'date',
+                  header: 'Published',
+                  render: (row: any) => <span className="font-mono-custom text-gray-400">{new Date(row.date).toLocaleDateString()}</span>
+                },
+                {
+                  key: 'changelog',
+                  header: 'Notes',
+                  render: (row: any) => <div className="text-gray-500 max-w-md truncate" dangerouslySetInnerHTML={{ __html: row.changelog }} />
+                },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  render: (row: any) => <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{row.status.toUpperCase()}</span>
+                },
+                {
+                  key: 'actions',
+                  header: 'Download',
+                  render: () => (
+                    <button onClick={handleDownloadFile} className="p-1 border rounded hover:bg-gray-50 text-gray-600 cursor-pointer shrink-0">
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                  )
+                }
+              ]}
+            />
+          </div>
+        )}
+
+        {/* Tab 2.5: Changelog Timeline */}
+        {activeTab === 'changelog' && (
+          <div className="bg-white border border-gray-200 rounded-md p-6 shadow-sm">
+            <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-6 border-b pb-2">Version Release Changelogs</h3>
+            <div className="relative border-l border-teal-200 ml-4 pl-6 space-y-8 select-none">
+              {allVersions.map((v: any) => (
+                <div key={v.version} className="relative">
+                  {/* Timeline dot */}
+                  <span className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full border-2 border-teal-500 bg-white" />
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        v.active 
+                          ? 'bg-emerald-100 border border-emerald-300 text-emerald-800' 
+                          : 'bg-gray-250 border border-gray-300 text-gray-700'
+                      }`}>
+                        v{v.version} {v.active && 'Active'}
+                      </span>
+                      <span className="text-xs text-gray-400 font-mono-custom">
+                        Released: {new Date(v.date).toLocaleDateString()}
+                      </span>
+                    </div>
+
+                    {/* Changelog Content */}
+                    <div 
+                      className="text-xs text-gray-650 prose prose-sm max-w-none bg-gray-50 border border-gray-200 rounded p-3"
+                      dangerouslySetInnerHTML={{ __html: v.changelog || 'No release notes.' }}
+                    />
+
+                    {/* Link back to Files section */}
+                    <div>
+                      <button
+                        onClick={() => {
+                          handleTabChange('files');
+                          setExpandedVersions(prev => ({
+                            ...prev,
+                            [v.version]: true
+                          }));
+                        }}
+                        className="flex items-center gap-1 text-[11px] font-bold text-teal-600 hover:text-teal-800 hover:underline mt-1"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        View files for v{v.version}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Files */}
+        {activeTab === 'files' && (
+          <div className="space-y-4">
+            {allVersions.map((v: any) => {
+              const files = getVersionFiles(v);
+              const totalSize = files.reduce((acc: number, f: any) => acc + f.sizeKb, 0).toFixed(1);
+              const isExpanded = !!expandedVersions[v.version];
+              
+              return (
+                <div key={v.version} className="bg-white border border-gray-200 rounded-md overflow-hidden shadow-sm">
+                  {/* Collapsible Section Header */}
+                  <div 
+                    onClick={() => toggleVersionExpanded(v.version)}
+                    className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-150 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        v.active 
+                          ? 'bg-emerald-100 border border-emerald-300 text-emerald-800' 
+                          : 'bg-gray-200 border border-gray-300 text-gray-700'
+                      }`}>
+                        v{v.version} {v.active && 'Active'}
+                      </span>
+                      <span className="text-xs text-gray-500 font-mono-custom">
+                        {new Date(v.date).toLocaleDateString()}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        ({files.length} files, {totalSize} KB)
+                      </span>
+                    </div>
+                    <div>
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-gray-500" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-gray-500" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Section Body */}
+                  {isExpanded && (
+                    <div className="p-4 bg-white">
+                      <SmartTable 
+                        data={files.map((f: any) => ({ ...f, id: f.name }))}
+                        columns={[
+                          {
+                            key: 'path',
+                            header: 'File Name',
+                            sortable: true,
+                            render: (row: any) => <span className="font-mono-custom font-bold text-gray-700">{row.name}</span>
+                          },
+                          {
+                            key: 'kind',
+                            header: 'Type',
+                            sortable: true,
+                            render: (row: any) => <span className="text-gray-505 text-xs">{row.kind}</span>
+                          },
+                          {
+                            key: 'size',
+                            header: 'File Size',
+                            sortable: true,
+                            render: (row: any) => <span className="font-mono-custom text-gray-400">{row.sizeKb} KB</span>
+                          },
+                          {
+                            key: 'actions',
+                            header: 'Actions',
+                            render: (row: any) => (
+                              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                <button
+                                  onClick={() => setSelectedFile({ path: row.name, content: row.content })}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  View
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const blob = new Blob([row.content || ''], { type: 'text/markdown' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = row.name;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                  }}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  Download
+                                </button>
+                              </div>
+                            )
+                          }
+                        ]}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Tab 4: Security scan details */}
+        {activeTab === 'security' || activeTab === 'scan' ? (
+          <div className="space-y-6">
+            
+            <div className="grid grid-cols-2 gap-4 select-none">
+              <StatCard
+                label="Scan Result Verdict"
+                value={getHealthDisplay(skill).toUpperCase()}
+                subtext="Derived from the latest security scan pipeline"
+                className={getHealthDisplay(skill) === 'Unhealthy' ? 'bg-red-50/10' : getHealthDisplay(skill) === 'Healthy' ? 'bg-emerald-50/10' : ''}
+              />
+              <StatCard label="Findings Matched" value={skill.scan?.findings?.length || 0} subtext="Total rule matches in last scan" />
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-md p-4 space-y-4">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider font-mono">Risk Scan Rule Catalog</h3>
+              
+              <SmartTable 
+                data={[
+                  { id: 'jail', type: 'HIGH', rule: 'Jail escapes checks', desc: 'Detects nested subprocess execution, eval, exec, compile calls.', count: 0 },
+                  { id: 'write', type: 'MEDIUM', rule: 'Undeclared writes checks', desc: 'Checks for shutil, os.remove, open write mode writes.', count: 0 },
+                  { id: 'net', type: 'MEDIUM', rule: 'Network access check', desc: 'Queries requests, sockets, urllib if network is disabled.', count: 0 },
+                  { id: 'token', type: 'LOW', rule: 'Hardcoded tokens check', desc: 'Matches credential expressions like sk-, ghp_ API tags.', count: 0 }
+                ]}
+                columns={[
+                  { key: 'type', header: 'Risk Severity', render: (row: any) => <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${row.type === 'HIGH' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-55 text-gray-500 border-gray-255'}`}>{row.type}</span> },
+                  { key: 'rule', header: 'Scanned check rule', render: (row: any) => <span className="font-semibold text-gray-700">{row.rule}</span> },
+                  { key: 'desc', header: 'Scan description', render: (row: any) => <span className="text-gray-400">{row.desc}</span> },
+                  { key: 'findings', header: 'Findings matches', render: (row: any) => <span className="font-mono-custom text-gray-750">{row.count}</span> }
+                ]}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Tab 5: Audit Log */}
+        {activeTab === 'audit' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4">
+            <SmartTable 
+              data={((skill as any).auditRecords || []).map((r: any, idx: number) => ({ ...r, id: idx }))}
+              columns={[
+                {
+                  key: 'status',
+                  header: 'Action',
+                  render: (row: any) => <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase">{row.healthStatus || 'Update'}</span>
+                },
+                {
+                  key: 'updatedBy',
+                  header: 'User identity',
+                  render: (row: any) => <span className="font-mono-custom text-gray-605">{row.updatedBy}</span>
+                },
+                {
+                  key: 'whatUpdated',
+                  header: 'Audit Details',
+                  render: (row: any) => <span className="font-semibold text-gray-750">{row.whatChanged}</span>
+                },
+                {
+                  key: 'date',
+                  header: 'Date Performed',
+                  render: (row: any) => <span className="font-mono-custom text-gray-450">{new Date(row.editedAt || skill.registeredAt).toLocaleDateString()}</span>
+                }
+              ]}
+            />
+          </div>
+        )}
+
+        {/* Tab 6: Comments */}
+        {activeTab === 'comments' && (
+          <div className="space-y-6">
+            
+            {/* Comment Composer */}
+            {currentUser && (
+              <form onSubmit={handlePostComment} className="bg-white border border-gray-200 rounded-md p-4 space-y-3.5">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider font-mono">Post a Comment</h3>
+                <textarea 
+                  value={newComment}
+                  onChange={e => setNewComment(e.target.value)}
+                  rows={3}
+                  required
+                  placeholder="Share feedback or runtime issues on this skill file..."
+                  className="w-full text-xs px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <div className="flex justify-end">
+                  <button type="submit" className="px-3.5 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer">
+                    Post Comment
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Comments List */}
+            <div className="space-y-4">
+              {skill.comments?.length === 0 ? (
+                <EmptyState description="No comments have been posted yet." />
+              ) : (
+                skill.comments?.map((comment, idx) => (
+                  <div key={idx} className="bg-white border border-gray-200 rounded-md p-4 shadow-sm select-none">
+                    <div className="flex items-center justify-between text-[11px] border-b pb-1.5 mb-2 border-gray-100">
+                      <span className="font-bold text-gray-700">{comment.author}</span>
+                      <span className="text-gray-400 font-mono-custom">{new Date(comment.date).toLocaleString()}</span>
+                    </div>
+                    <p className="text-xs text-gray-600 leading-relaxed font-semibold">{comment.text}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* Edit Config Modal */}
+      {isEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-md bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <form onSubmit={handleSaveEdit}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-55">
+                <h3 className="text-sm font-semibold text-gray-800">Edit Skill Config</h3>
+                <button type="button" onClick={() => setIsEditOpen(false)} className="text-gray-400 font-bold">✕</button>
+              </div>
+              <div className="p-4 space-y-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Skill Name *</label>
+                  <input 
+                    type="text" 
+                    value={editName} 
+                    onChange={e => setEditName(e.target.value)} 
+                    className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Description</label>
+                  <textarea 
+                    value={editDesc} 
+                    onChange={e => setEditDesc(e.target.value)} 
+                    rows={4}
+                    className="w-full px-2.5 py-1.5 border border-gray-255 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-55">
+                <button type="button" onClick={() => setIsEditOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer">Cancel</button>
+                <button type="submit" className="px-3.5 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
-      {/* EDIT DIALOG */}
-      <EditAssetDialog
-        isOpen={isEditOpen}
-        onOpenChange={setIsEditOpen}
-        kind="skill"
-        item={skill}
-        onSave={updates => {
-          updateItem('skill', skill.id, updates);
-        }}
-      />
+
+      {/* Delete Direct confirm Dialog (SA-only) */}
+      {isDeleteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-sm bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <div className="p-5 text-center space-y-3">
+              <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto" />
+              <h3 className="text-sm font-bold text-gray-800">Directly Delete Skill</h3>
+              <p className="text-xs text-gray-505 leading-relaxed">
+                Are you sure you want to delete "{skill.name}"? This operation executes immediately and produces a ChangeRecord.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-55">
+              <button onClick={() => setIsDeleteOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer text-xs font-semibold">Cancel</button>
+              <button onClick={handleDirectDelete} className="px-3.5 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 cursor-pointer text-xs font-semibold">Delete Directly</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Request Deletion confirm Dialog (Owner) */}
+      {isDelReqOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-md bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-800">Submit Deletion Request</h3>
+              <button type="button" onClick={() => setIsDelReqOpen(false)} className="text-gray-400 font-bold">✕</button>
+            </div>
+            <div className="p-4 space-y-3 text-xs">
+              <p className="text-gray-500">Submit a deletion proposal. A Super Admin must audit and approve this delete before execution.</p>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">Reason for Deletion (Optional)</label>
+                <textarea 
+                  value={delReason}
+                  onChange={e => setDelReason(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Skill code has been decommissioned..."
+                  className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
+              <button onClick={() => setIsDelReqOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer text-xs font-semibold">Cancel</button>
+              <button onClick={handleSubmitDelReq} className="px-3.5 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 cursor-pointer text-xs font-semibold">Submit Request</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Compare Modal */}
+      {isCompareOpen && selectedVersions.length === 2 && (
+        <CompareDialog 
+          assetName={skill.name}
+          verA={selectedVersions[0]}
+          verB={selectedVersions[1]}
+          onClose={() => {
+            setIsCompareOpen(false);
+            setSelectedVersions([]);
+          }}
+        />
+      )}
+
+      {/* File Viewer Modal */}
+      {selectedFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-2xl bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50 flex flex-col h-[500px]">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-55">
+              <h3 className="text-xs font-bold text-gray-800 truncate font-mono-custom">{selectedFile.path}</h3>
+              <button type="button" onClick={() => setSelectedFile(null)} className="text-gray-400 font-bold hover:text-gray-700">✕</button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 bg-gray-50 text-xs font-mono-custom select-text leading-relaxed">
+              <pre className="whitespace-pre-wrap">{selectedFile.content}</pre>
+            </div>
+            <div className="flex justify-end px-4 py-3 border-t border-gray-200 bg-gray-55">
+              <button onClick={() => setSelectedFile(null)} className="px-3.5 py-1.5 text-xs font-semibold border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

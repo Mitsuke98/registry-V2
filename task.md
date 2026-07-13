@@ -1,0 +1,54 @@
+# Task Checklist - Registry v3
+
+- [x] **Phase 0: Scaffold & Setup**
+  - [x] Install missing fonts (`@fontsource-variable/inter`, `@fontsource-variable/jetbrains-mono`)
+  - [x] Update index.css with CSS variables, tokens, and font setup
+  - [x] Setup shadcn / Radix / lucide icons as needed
+- [x] **Phase 1: Playground & Primitives**
+  - [x] Build UI components: `CatPill`, `StatusBadge`, `ScanGrade`, `RatingStars`, `BookmarkToggle`, `VisibilityBadge`, `CopyBlock`, `CopyHashField`, `SegmentedStatPill`, `EmptyState`, `TrendArrow`, `EnableToggle`, `TestButton`
+  - [x] Build major primitives: `RoleShell`, `CardShell`, `SmartTable`, `StatCard`, `FilterBar`, `Wizard`, `CommandPalette`, `ChangelogEditor`, `VersionsTable + CompareDialog`
+  - [x] Create `/playground` route showcasing all components and layout combinations
+- [x] **Phase 2: Data layer & can Functions**
+  - [x] Define types in `src/data/types.ts`
+  - [x] Populate seeds in `src/data/fixtures.ts` (10+ servers, 4+ workspaces, mock comments, ratings, etc.)
+  - [x] Code context `RegistryContext.tsx` with user state, asset lists, approvals, deletion requests, comments, workspaces, change records with cap-20 revert history
+- [x] **Phase 3: SSO & RoleShell Routes**
+  - [x] Build `SsoLogin` page with active users
+  - [x] Connect `RoleShell` to router and active role
+  - [x] Verify route-gating redirects
+- [x] **Phase 4: Catalog & CardShells**
+  - [x] Build `/catalog` page with facet tabs and FilterBar
+  - [x] Support bookmark filtering, tag-hashing color matching, grid/list toggle
+  - [x] Verify catalog listings obey visibility rules
+- [x] **Phase 5: Detail Pages & Actions**
+  - [x] Develop MCP Server Detail tabs (9 tabs)
+  - [x] Develop A2A Agent Detail tabs (7 tabs)
+  - [x] Develop Skill Detail tabs (6 tabs)
+  - [x] Develop Prompt Detail tabs (4 tabs)
+  - [x] Implement owner/SA header actions (Enable/Disable, Visibility, Deletion, Version Bump)
+- [x] **Phase 6: Wizards & Forms**
+  - [x] Implement MCP registration wizard (5 steps)
+  - [x] Implement A2A registration wizard (5 steps)
+  - [x] Implement Skill registration wizard (3 steps with upload validation scan)
+  - [x] Implement Prompt registration wizard (3 steps, gated)
+- [x] **Phase 7: Versioning Flow**
+  - [x] Implement publish new version owner action
+  - [x] Implement SA approvals queue for new versions
+- [x] **Phase 8: Deletion Flow**
+  - [x] Implement request deletion owner action
+  - [x] Implement SA approvals queue for deletion requests + Change history log and Revert
+- [x] **Phase 9: Workspace CRUD & Users**
+  - [x] Add SA Workspace management (Create, Edit, Delete, Members)
+  - [x] Add SA User management (Create, Edit, Deactivate, Stats)
+- [x] **Phase 10: Approvals Queue & History**
+  - [x] Build approvals dashboard with KPI-filter cards, tabs, and bulk action bar
+  - [x] Enable queue walk with details modal, Arrow Keys and Prev/Next triggers
+- [x] **Phase 11: Home Dashboards**
+  - [x] Build Alex's `/home` dashboard (KPI cards, submissions queue, performance ranking)
+  - [x] Build Jordan's `/dashboard` (Executive KPI, platform activity, trending)
+- [x] **Phase 12: Audit & Polish**
+  - [x] Verify sticky headers, skeletons, keyboard navigation, alerts
+  - [x] Remove playground route
+- [x] **Phase 13: Build Verification**
+  - [x] Run typescript checks and `npm run build`
+  - [x] Verify `dist/index.html` runs offline

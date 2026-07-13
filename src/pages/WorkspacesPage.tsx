@@ -1,49 +1,39 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRegistry } from '@/data/RegistryContext';
-import { useSearch, usePageSearch } from '@/context/SearchContext';
-import { CardShell } from '@/components/registry/CardShell';
-import { EntityIcon } from '@/components/registry/UIHelperKit';
-import { FolderHeart, Plus, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-
-const KNOWN_USERS = ['Alex Vance', 'Jordan Blake', 'Sarah Chen', 'Michael Scott'];
+import { CardShell } from '@/components/registry/Primitives';
+import { EmptyState } from '@/components/registry/Kit';
+import { Plus, FolderOpen } from 'lucide-react';
+import { toast } from 'sonner';
 
 export const WorkspacesPage: React.FC = () => {
   const navigate = useNavigate();
-  const { workspaces, can, createWorkspace, mcpServers, a2aAgents, skills, prompts } = useRegistry();
-  const { query } = useSearch();
-
-  usePageSearch('Search workspaces…');
-
-  const getWorkspaceItemCount = (ws: any) => {
-    let count = 0;
-    const countInList = (sourceList: any[]) => {
-      sourceList.forEach(item => {
-        if (ws.kind === 'personal') {
-          if (item.ownerName === ws.ownerName) count++;
-        } else {
-          if (item.status === 'approved' && !item.disabled && item.visibility?.workspaceIds?.includes(ws.id)) {
-            count++;
-          }
-        }
-      });
-    };
-    countInList(mcpServers);
-    countInList(a2aAgents);
-    countInList(skills);
-    countInList(prompts);
-    return count;
-  };
+  const { 
+    workspaces, currentUser, createWorkspace, 
+    mcpServers, a2aAgents, skills, prompts 
+  } = useRegistry();
 
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [owner, setOwner] = useState('Jordan Blake');
-  const [memberInput, setMemberInput] = useState('');
   const [members, setMembers] = useState<string[]>([]);
+  const [memberInput, setMemberInput] = useState('');
+
+  const isSA = currentUser?.role === 'super_admin';
+
+  // Filter workspaces: SA sees all, End User sees only workspaces they are a member of
+  const visibleWorkspaces = workspaces.filter(ws => {
+    if (isSA) return true;
+    return ws.members.includes(currentUser?.name || '');
+  });
+
+  const getWorkspaceItemCount = (wsId: string) => {
+    const sCount = mcpServers.filter(s => s.status === 'approved' && !s.disabled && s.visibility?.workspaceIds?.includes(wsId)).length;
+    const aCount = a2aAgents.filter(a => a.status === 'approved' && a.visibility?.workspaceIds?.includes(wsId)).length;
+    const skCount = skills.filter(s => s.status === 'approved' && s.visibility?.workspaceIds?.includes(wsId)).length;
+    const pCount = prompts.filter(p => p.status === 'approved' && p.visibility?.workspaceIds?.includes(wsId)).length;
+    return sCount + aCount + skCount + pCount;
+  };
 
   const handleAddMember = () => {
     const trimmed = memberInput.trim();
@@ -53,171 +43,152 @@ export const WorkspacesPage: React.FC = () => {
     }
   };
 
-  const handleRemoveMember = (m: string) => {
-    setMembers(members.filter(item => item !== m));
-  };
-
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreateWorkspace = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name) return;
+    if (!name.trim()) {
+      toast.error('Workspace name is required.');
+      return;
+    }
+
     createWorkspace({
-      name,
-      description,
-      kind: 'team',
-      ownerName: owner,
-      members
+      name: name.trim(),
+      description: description.trim(),
+      kind: 'shared',
+      ownerName: currentUser?.name || 'Admin',
+      members: [currentUser?.name || 'Admin', ...members]
     });
+
     setIsOpen(false);
-    // Reset form
     setName('');
     setDescription('');
-    setOwner('Jordan Blake');
     setMembers([]);
+    toast.success('Workspace created successfully.');
   };
 
-  const filteredWorkspaces = workspaces.filter((ws) => {
-    const term = query.toLowerCase();
-    return (
-      ws.name.toLowerCase().includes(term) ||
-      ws.description.toLowerCase().includes(term) ||
-      ws.ownerName.toLowerCase().includes(term)
-    );
-  });
-
   return (
-    <div className="space-y-6">
-      {/* Header section */}
-      <div className="flex items-center justify-between">
+    <div className="p-6 space-y-6 select-none">
+      
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-200 pb-5">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground select-none">Workspaces</h1>
-          <p className="text-[13px] text-muted-foreground mt-1">
-            Collections of assets and configurations shared within your teams.
-          </p>
+          <h1 className="text-xl font-bold tracking-tight text-gray-800">Team Workspaces</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Shared collections of assets and access scopes configured across departments.</p>
         </div>
-        {can('crud-workspace') && (
-          <Button onClick={() => setIsOpen(true)} className="h-9 text-xs font-semibold gap-1.5 cursor-pointer">
-            <Plus className="size-4" />
-            <span>New workspace</span>
-          </Button>
+        
+        {isSA && (
+          <button 
+            onClick={() => setIsOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer focus:outline-none"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Create Workspace
+          </button>
         )}
       </div>
 
-      {filteredWorkspaces.length === 0 ? (
-        <div className="flex flex-col items-center justify-center border border-dashed border-border rounded-xl p-12 text-center bg-card select-none">
-          <FolderHeart className="size-8 text-muted-foreground/60 mb-2" />
-          <p className="text-[13px] text-muted-foreground">No workspaces match your query.</p>
-        </div>
+      {visibleWorkspaces.length === 0 ? (
+        <EmptyState 
+          description="You are not a member of any shared team workspaces yet."
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredWorkspaces.map((ws) => (
+          {visibleWorkspaces.map(ws => (
             <div key={ws.id} onClick={() => navigate(`/workspaces/${ws.id}`)} className="cursor-pointer">
-              <CardShell
-                variant="entity"
-                icon={<EntityIcon kind="prompt" className="size-4" />} // Folder placeholder icon style
-                title={ws.name}
-                subTitle={ws.ownerIsCurrentUser ? 'Personal Workspace' : `Shared by ${ws.ownerName}`}
+              <CardShell 
+                kind="server" // Using server card variant as generic folder shell
+                name={ws.name}
+                subline={`Shared workspace · ${ws.members.length} members`}
                 description={ws.description}
-                footer={
-                  <div className="flex items-center justify-between w-full select-none font-mono text-[11px]">
-                    <span>{getWorkspaceItemCount(ws)} items configured</span>
-                    <span className="uppercase text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold">{ws.kind}</span>
-                  </div>
-                }
+                footerText={`${getWorkspaceItemCount(ws.id)} assets configured`}
+                topRightSlot={<FolderOpen className="w-4 h-4 text-gray-400" />}
               />
             </div>
           ))}
         </div>
       )}
 
-      {/* CREATE WORKSPACE DIALOG */}
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-[480px] p-6 bg-card border border-border rounded-xl">
-          <DialogHeader className="mb-4 select-none">
-            <DialogTitle className="text-base font-bold text-foreground">Create Workspace</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Define a new team workspace.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground font-semibold select-none">Name *</label>
-              <Input
-                value={name}
-                onChange={e => setName(e.target.value)}
-                required
-                placeholder="Marketing Tools, Dev Team, etc."
-                className="h-9 text-xs"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground font-semibold select-none">Description</label>
-              <textarea
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                rows={3}
-                placeholder="Describe this workspace..."
-                className="w-full rounded-lg border border-border bg-transparent p-2 text-xs focus:outline-none focus:border-primary/50 text-foreground"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground font-semibold select-none">Owner *</label>
-              <select
-                value={owner}
-                onChange={e => setOwner(e.target.value)}
-                className="w-full h-9 px-3 rounded-lg border border-border bg-background text-xs font-semibold cursor-pointer focus:outline-none"
-              >
-                {KNOWN_USERS.map(user => (
-                  <option key={user} value={user}>{user}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[11px] text-muted-foreground font-semibold select-none">Members</label>
-              <div className="flex gap-2">
-                <Input
-                  value={memberInput}
-                  onChange={e => setMemberInput(e.target.value)}
-                  placeholder="Add member name..."
-                  className="h-9 text-xs flex-1"
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddMember();
-                    }
-                  }}
-                />
-                <Button type="button" onClick={handleAddMember} variant="outline" className="h-9 text-xs">Add</Button>
+      {/* CREATE WORKSPACE DIALOG (SA-only) */}
+      {isOpen && isSA && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-md bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <form onSubmit={handleCreateWorkspace}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-800">New Shared Workspace</h3>
+                <button type="button" onClick={() => setIsOpen(false)} className="text-gray-400 font-bold hover:text-gray-600">✕</button>
               </div>
 
-              {members.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-2 max-h-[80px] overflow-y-auto">
-                  {members.map(m => (
-                    <span key={m} className="inline-flex items-center gap-1 text-[11px] font-medium bg-muted text-muted-foreground px-2 py-0.5 rounded border border-border/30">
-                      <span>{m}</span>
-                      <button type="button" onClick={() => handleRemoveMember(m)} className="text-muted-foreground hover:text-foreground cursor-pointer">
-                        <X className="size-3" />
-                      </button>
-                    </span>
-                  ))}
+              <div className="p-4 space-y-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Workspace Name *</label>
+                  <input 
+                    type="text"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    required
+                    placeholder="e.g. Finance Analytics team"
+                    className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
                 </div>
-              )}
-            </div>
 
-            <div className="flex items-center justify-end gap-2 pt-4 select-none">
-              <Button type="button" variant="outline" onClick={() => setIsOpen(false)} className="h-9 text-xs font-semibold rounded-lg">
-                Cancel
-              </Button>
-              <Button type="submit" className="h-9 px-5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/95 shadow-sm">
-                Create Workspace
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Description</label>
+                  <textarea 
+                    value={description}
+                    onChange={e => setDescription(e.target.value)}
+                    rows={3}
+                    placeholder="Describe the usage parameters of this workspace..."
+                    className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                {/* Add member box */}
+                <div className="space-y-2">
+                  <label className="block font-semibold text-gray-700">Configure Members</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text"
+                      value={memberInput}
+                      onChange={e => setMemberInput(e.target.value)}
+                      placeholder="e.g. Sarah Chen"
+                      className="flex-1 px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddMember();
+                        }
+                      }}
+                    />
+                    <button 
+                      type="button"
+                      onClick={handleAddMember}
+                      className="px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 font-semibold cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  {members.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+                      {members.map(m => (
+                        <span key={m} className="inline-flex items-center gap-1 bg-gray-50 border px-2 py-0.5 rounded text-[10px] font-bold text-gray-600">
+                          {m}
+                          <button type="button" onClick={() => setMembers(members.filter(x => x !== m))} className="text-gray-400 hover:text-gray-600">✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50 text-xs font-semibold">
+                <button type="button" onClick={() => setIsOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer">Cancel</button>
+                <button type="submit" className="px-4 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer">Create Workspace</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

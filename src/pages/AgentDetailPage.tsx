@@ -1,917 +1,1190 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useRegistry } from '@/data/RegistryContext';
-import { usePageSearch } from '@/context/SearchContext';
-import { useDetailTab } from '@/context/DetailTabContext';
+import { 
+  EntityIcon, StatusBadge, RatePopover, BookmarkToggle, 
+  EnableToggle, EmptyState, CopyBlock, HealthDot
+} from '@/components/registry/Kit';
+import { SmartTable, StatCard } from '@/components/registry/Primitives';
+import { 
+  Edit, Globe, AlertTriangle, Play
+} from 'lucide-react';
 import { toast } from 'sonner';
-import { ChartCard } from '@/components/registry/ChartCard';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DetailHeader } from '@/components/registry/DetailHeader';
-import { StatusPillCard } from '@/components/registry/StatusPillCard';
-import type { StatusPillConfig } from '@/components/registry/StatusPillCard';
-import { DetailTabs } from '@/components/registry/DetailTabs';
-import { SubTabs } from '@/components/registry/SubTabs';
-import { SmartTable } from '@/components/registry/SmartTable';
-import { EnableToggle, TestButton } from '@/components/registry/TestDialogs';
-import { VersionsTable } from '@/components/registry/VersionsTable';
-import { VerifiedBadge, ScanGrade, StatusBadge, RatingStars, RatePopover, BookmarkToggle, CopyBlock, EmptyState, VisibilityPopover } from '@/components/registry/UIHelperKit';
-import { Sparkles } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { TableRow, TableCell } from '@/components/ui/table';
-import { EditAssetDialog } from '@/components/registry/EditAssetDialog';
-import { Edit, Trash2 } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 
 export const AgentDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { a2aAgents, skills, can, updateItem, deleteItem, setItemDisabled } = useRegistry();
-  const detailTabContext = useDetailTab();
+  const { 
+    a2aAgents, skills, currentUser, bookmarks, toggleBookmark, rateItem, 
+    updateItem, setItemDisabled, setItemVisibility, requestDeletion, 
+    cancelDeletionRequest, deleteItemDirect, can, workspaces, getHealthDisplay
+  } = useRegistry();
 
-  const activeTab = searchParams.get('tab') || 'overview';
-  const [overviewSubTab, setOverviewSubTab] = useState<'info' | 'connection' | 'registry'>('info');
-  const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
-
-  // Edit / Delete states
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [simulateFail, setSimulateFail] = useState(false);
+  const [selectedAuditRecord, setSelectedAuditRecord] = useState<any | null>(null);
+  const [isVisibilityOpen, setIsVisibilityOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDelReqOpen, setIsDelReqOpen] = useState(false);
+  const [delReason, setDelReason] = useState('');
+  const [isTestDialogOpen, setIsTestDialogOpen] = useState(false);
+  const [selectedTestSkill, setSelectedTestSkill] = useState('');
+  const [testInput, setTestInput] = useState('');
+  const [isRunningTest, setIsRunningTest] = useState(false);
+  const [testResult, setTestResult] = useState<any | null>(null);
+  const [testStatus, setTestStatus] = useState<'success' | 'failure' | null>(null);
+  // Edit Form Fields
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
 
-  // Integration states
-  const [integrationLang, setIntegrationLang] = useState<'ts' | 'python'>('ts');
-  const [responseSubTab, setResponseSubTab] = useState<'success' | 'errors' | 'format'>('success');
-
-  const agent = a2aAgents.find((a) => a.id === id);
-
-  usePageSearch(agent ? `Search in ${agent.name}...` : 'Search agent details...');
+  // Find asset
+  const agent = a2aAgents.find(a => a.id === id);
 
   useEffect(() => {
     if (agent) {
-      detailTabContext?.setActiveTab(activeTab === 'overview' ? '' : activeTab);
+      setEditName(agent.name);
+      setEditDesc(agent.description);
     }
-    return () => {
-      detailTabContext?.setActiveTab('');
-    };
-  }, [activeTab, agent, detailTabContext]);
+  }, [agent]);
+
+  const handleTabChange = (tabKey: string) => {
+    setActiveTab(tabKey);
+    setSearchParams({ tab: tabKey });
+  };
+
+  const handleRunTest = () => {
+    if (isRunningTest) return;
+    setIsRunningTest(true);
+    setTestResult(null);
+    setTestStatus(null);
+
+    setTimeout(() => {
+      setIsRunningTest(false);
+      const isFailed = testInput.toLowerCase().includes('error') || testInput.toLowerCase().includes('fail') || simulateFail;
+      if (isFailed) {
+        setTestStatus('failure');
+        setTestResult({
+          status: 'error',
+          code: 500,
+          message: `Failed to execute agent test action: Skill execution timeout on '${selectedTestSkill || 'custom'}' coordination node.`,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        setTestStatus('success');
+        setTestResult({
+          status: 'success',
+          agent: agent?.name,
+          skill_invoked: selectedTestSkill || 'custom_message',
+          input_payload: testInput || 'Empty prompt input',
+          response: `Simulated execution successful. Node processed input and generated a valid outcome with high confidence matching the agent constraints.`,
+          latency_ms: Math.floor(Math.random() * 400) + 800,
+          tokens_used: Math.floor(Math.random() * 200) + 150
+        });
+      }
+    }, 1200);
+  };
 
   if (!agent) {
     return (
-      <EmptyState
-        message="Agent not found. The agent you are looking for does not exist."
-        actionLabel="Back to Catalog"
-        onAction={() => window.history.back()}
-      />
+      <div className="p-8 text-center">
+        <h2 className="text-sm font-bold text-gray-800">A2A Agent not found.</h2>
+        <button 
+          onClick={() => navigate('/catalog')}
+          className="mt-4 px-3.5 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground cursor-pointer"
+        >
+          Return to Catalog
+        </button>
+      </div>
     );
   }
 
-  const handleTabChange = (key: string) => {
-    setSearchParams({ tab: key });
+  const isBookmarked = bookmarks.agent?.includes(agent.id) || false;
+  const isOwner = currentUser?.name === agent.ownerName;
+  const showEditButton = (isOwner && (agent.status === 'pending' || agent.status === 'in_review')) || (currentUser?.role === 'super_admin');
+
+  // Chart telemetry data
+  const chartData = agent.weeklyCalls?.map((calls, idx) => ({
+    week: `W${idx + 1}`,
+    calls,
+    success: Math.round(calls * ((agent.weeklySuccessRate?.[idx] || 95) / 100))
+  })) || [];
+
+  // Skills linked to this agent
+  const agentSkills = (agent.skillRefs || []).map(ref => {
+    const sObj = skills.find(sk => sk.id === ref.skillId);
+    return {
+      id: ref.skillId,
+      name: sObj?.name || ref.skillId,
+      version: ref.version,
+      description: sObj?.description || 'Registered skill code configuration.'
+    };
+  });
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editName.trim()) {
+      toast.error('Name is required.');
+      return;
+    }
+    updateItem('agent', agent.id, { name: editName, description: editDesc });
+    setIsEditOpen(false);
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  const handleDirectDelete = () => {
+    deleteItemDirect('agent', agent.id);
+    navigate('/catalog');
+    toast.success('A2A Agent deleted.');
   };
 
-  const formatDateTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+  const handleSubmitDelReq = () => {
+    requestDeletion('agent', agent.id, delReason);
+    setIsDelReqOpen(false);
   };
 
-  // Derive agent health status from successRatePct
-  const agentHealth = agent.successRatePct >= 97
-    ? 'healthy'
-    : agent.successRatePct >= 90
-      ? 'degraded'
-      : 'down';
+  const handleCancelDelReq = () => {
+    cancelDeletionRequest('agent', agent.id);
+  };
 
-  // Get autonomy level
-  const autonomy = agent.capabilities?.autonomyLevel || 'Mid';
+  const handleRunHealthCheck = () => {
+    setIsCheckingHealth(true);
+    toast.info('Initializing system health check scan...');
+    
+    setTimeout(() => {
+      if (simulateFail) {
+        toast.error('Health scan complete: Critical threat threshold failure!');
+        
+        const nextTelemetry = {
+          successRatePct: 78,
+          avgResponseMs: 380,
+          totalCalls30d: (agent.totalCalls30d || 0) + 1
+        };
 
-  // Pills Config
-  const statusPills: StatusPillConfig[] = [
-    { label: 'Health Status', value: agentHealth, variant: 'health' },
-    { label: 'Approval Status', value: agent.status, variant: 'approval' },
-    { label: 'Entity Type', value: 'A2A Agent', variant: 'neutral' },
-    { label: 'Autonomy Level', value: autonomy.toUpperCase(), variant: 'neutral' }
-  ];
+        const checkRecord = {
+          timestamp: new Date().toISOString(),
+          status: 'unhealthy',
+          performedBy: currentUser?.name || 'System Scanner',
+          responseMs: 380
+        };
 
-  const tabs = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'skills', label: 'Skills' },
-    { key: 'audit-log', label: 'Audit Log' },
-    { key: 'health-status', label: 'Health Status' },
-    { key: 'integration', label: 'Integrations' },
-    { key: 'security', label: 'Security' },
-    { key: 'version', label: 'Version' }
-  ];
+        const auditRecord = {
+          editedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'System Scanner',
+          healthStatus: 'Unhealthy',
+          whatChanged: 'System Health Scan failed security threshold',
+          remark: 'Manual simulation trigger: asset returned unhealthy status code and telemetry checks failed.'
+        };
 
-  // Connection info definitions
-  const agentEndpoint = agent.endpoint || `https://api.agentregistry.internal/v1/agents/${agent.id}`;
-  const gatewayUrl = `${agentEndpoint}/message`;
+        updateItem('agent', agent.id, {
+          health: {
+            status: 'unhealthy',
+            ...nextTelemetry
+          },
+          healthChecks: [checkRecord, ...(agent.healthChecks || [])],
+          auditRecords: [auditRecord, ...(agent.auditRecords || [])]
+        });
+      } else {
+        toast.success('Health scan complete: All telemetry components healthy.');
+        const nextTelemetry = {
+          successRatePct: 99,
+          avgResponseMs: 12,
+          totalCalls30d: (agent.totalCalls30d || 0) + 1
+        };
 
-  // Get exposed skills
-  const agentSkills = skills.filter((s) => s.parentId === agent.id || agent.skillIds?.includes(s.id));
+        const checkRecord = {
+          timestamp: new Date().toISOString(),
+          status: 'healthy',
+          performedBy: currentUser?.name || 'System Scanner',
+          responseMs: 12
+        };
 
-  // Security scan rules
-  const securityRules = [
-    { rule: 'Sandbox Escapes & Jail Check', severity: 'High', status: agent.trust.score >= 85 ? 'pass' : 'warn', detail: 'Prevents reading files outside root directory scopes.' },
-    { rule: 'Third-party Dependency Audits', severity: 'High', status: agent.trust.score >= 90 ? 'pass' : 'fail', detail: 'Checks for known vulnerabilities in package trees.' },
-    { rule: 'Hardcoded Authentication Secrets', severity: 'High', status: 'pass', detail: 'Zero static passwords or API tokens found.' },
-    { rule: 'Network Access Sanity', severity: 'Medium', status: 'pass', detail: 'HTTP transports require certified SSL targets.' },
-    { rule: 'Process Execution Safety', severity: 'Medium', status: 'pass', detail: 'Restricts arbitrary shell spawns.' },
-    { rule: 'Memory Allocations Overhead', severity: 'Low', status: 'pass', detail: 'Memory footprints remain under 60MB thresholds.' },
-    { rule: 'License Compliance Check', severity: 'Low', status: 'pass', detail: 'Permissive OS license matches policy rules.' },
-    { rule: 'API Call Rate Limits', severity: 'Low', status: 'pass', detail: 'Internal request throttles are configured.' }
-  ];
+        const auditRecord = {
+          editedAt: new Date().toISOString(),
+          updatedBy: currentUser?.name || 'System Scanner',
+          healthStatus: 'Healthy',
+          whatChanged: 'System Health Scan passed successfully',
+          remark: 'Manual simulation trigger: asset telemetry verification successfully returned status healthy.'
+        };
 
-  // Integration snippets
-  const cliInstall = integrationLang === 'ts'
-    ? `npm install @modelcontextprotocol/agent-sdk`
-    : `pip install mcp-agent-sdk`;
-
-  const codeExample = integrationLang === 'ts'
-    ? `import { AgentClient } from "@modelcontextprotocol/agent-sdk";
-
-const client = new AgentClient({
-  endpoint: "${agentEndpoint}",
-  authToken: "mock_access_token_su_2026"
-});
-
-const response = await client.sendMessage({
-  message: "Reconcile Stripe balance logs from yesterday",
-  stream: false
-});
-console.log("Agent response:", response);`
-    : `import asyncio
-from mcp_agent import AgentClient
-
-async def main():
-    client = AgentClient(
-        endpoint="${agentEndpoint}",
-        auth_token="mock_access_token_su_2026"
-    )
-    response = await client.send_message(
-        message="Reconcile Stripe balance logs from yesterday"
-    )
-    print("Agent response:", response)
-
-asyncio.run(main())`;
-
-  const successResponse = `{
-  "status": "completed",
-  "result": {
-    "output": "Stripe balance reconciled successfully: 2 discrepancies resolved.",
-    "tokensUsed": 1024,
-    "latencyMs": 1420
-  }
-}`;
-
-  const commonErrors = `{
-  "status": "error",
-  "error": {
-    "code": "AUTONOMY_BLOCKED",
-    "message": "Task requires high autonomy. Current policy limit is set to Mid."
-  }
-}`;
-
-  const errorFormat = `{
-  "status": "failed",
-  "error": {
-    "code": "INTERNAL_SERVER_ERROR",
-    "message": "Agent service execution timed out."
-  }
-}`;
-
-  // Fake chart data for lines
-  const chartData = agent.weeklyCalls.map((calls, index) => ({
-    name: `W${index + 1}`,
-    Calls: calls,
-    'Success Rate': agent.weeklySuccessRate ? agent.weeklySuccessRate[index] : 100,
-  }));
-
-  // Setup capabilities list
-  const capabilityToggles = [
-    { key: 'reasoning', label: 'Reasoning' },
-    { key: 'memory', label: 'Memory' },
-    { key: 'collaboration', label: 'Collaboration' },
-    { key: 'streaming', label: 'Streaming' },
-    { key: 'multimodal', label: 'Multimodal' },
-    { key: 'logging', label: 'Logging' }
-  ];
+        updateItem('agent', agent.id, {
+          health: {
+            status: 'healthy',
+            ...nextTelemetry
+          },
+          healthChecks: [checkRecord, ...(agent.healthChecks || [])],
+          auditRecords: [auditRecord, ...(agent.auditRecords || [])]
+        });
+      }
+      setIsCheckingHealth(false);
+    }, 1500);
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <DetailHeader
-        iconName={agent.iconName || 'bot'}
-        name={agent.name}
-        badgeCluster={
-          <>
-            <StatusBadge status={agent.status} />
-            {agent.disabled && (
-              <span className="text-[10px] font-bold border border-red-500/20 bg-red-500/5 text-red-600 px-1.5 py-0.5 rounded uppercase leading-none">
-                Disabled
-              </span>
-            )}
-            {agent.trust.verified && <VerifiedBadge />}
-            <ScanGrade score={agent.trust.score} />
-          </>
-        }
-        description={agent.description}
-        metaLine={
-          <>
-            <span className="font-semibold text-foreground">{agent.publisher}</span>
-            <span>·</span>
-            <span>Registered {formatDate(agent.registeredAt)}</span>
-            <span>·</span>
-            <RatingStars rating={agent.rating} reviewsCount={agent.reviewsCount} />
-          </>
-        }
-        tags={agent.tags}
-        actionSlot={
-          <>
-            <BookmarkToggle kind="agent" id={agent.id} />
-            <RatePopover kind="agent" id={agent.id} />
-            <VisibilityPopover kind="agent" id={agent.id} />
+    <div className="relative select-none pb-12">
+      
+      {/* Sticky Detail Header on scroll */}
+      <div className="sticky top-0 bg-white/95 border-b border-gray-200 px-6 py-3 flex items-center justify-between z-20 backdrop-blur-sm">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <EntityIcon kind="agent" size="sm" />
+          <div className="min-w-0">
+            <h1 className="text-xs font-bold text-gray-800 truncate">{agent.name}</h1>
+            <p className="text-[10px] text-gray-400 mt-0.5 truncate font-mono-custom">v{agent.version} · {agent.publisher?.name || 'Community'}</p>
+          </div>
+          <div className="flex gap-1.5 items-center shrink-0">
+            <StatusBadge status={agent.status} disabled={agent.disabled} deletionRequested={agent.deletionRequested} />
+            <span className="bg-purple-50 text-purple-700 border border-purple-200 text-[10px] font-bold px-2 py-0.5 rounded-full select-none">
+              {agent.autonomy} Autonomy
+            </span>
+          </div>
+        </div>
 
-            {can('edit', agent) && (
-              <Button variant="outline" onClick={() => setIsEditOpen(true)} className="h-9 text-xs font-semibold gap-1.5 cursor-pointer">
-                <Edit className="size-3.5" />
-                <span>Edit</span>
-              </Button>
-            )}
+        {/* Action Controls */}
+        <div className="flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
+          <BookmarkToggle isBookmarked={isBookmarked} onToggle={() => toggleBookmark('agent', agent.id)} />
+          <RatePopover itemId={agent.id} currentRating={agent.rating} onRate={(r) => rateItem('agent', agent.id, r)} />
+          
+          <button
+            onClick={() => {
+              toast.success(`Calling agent ${agent.name}...`, {
+                description: 'Agent connection loop established. Telemetry returned success.'
+              });
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary text-white hover:bg-primary/95 font-bold text-xs select-none transition-colors cursor-pointer"
+          >
+            Call agent
+          </button>
 
-            {can('delete', agent) && (
-              <Button variant="destructive" onClick={() => setIsDeleteOpen(true)} className="h-9 text-xs font-semibold gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer">
-                <Trash2 className="size-3.5" />
-                <span>Delete</span>
-              </Button>
-            )}
+          <button
+            onClick={() => {
+              setSelectedTestSkill('');
+              setTestInput('');
+              setTestResult(null);
+              setTestStatus(null);
+              setIsTestDialogOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 font-bold text-xs select-none transition-colors cursor-pointer"
+          >
+            <Play className="w-3.5 h-3.5 text-gray-400" /> Test agent
+          </button>
+          
+          {/* Enable/Disable Switch (Owner/SA) */}
+          {can('toggle-disabled', agent) && (
+            <div className="flex items-center gap-2 border border-gray-200 rounded px-2.5 py-1 bg-white text-xs select-none">
+              <span className="text-[11px] font-semibold text-gray-500">Enabled</span>
+              <EnableToggle checked={!agent.disabled} onChange={(checked) => setItemDisabled('agent', agent.id, !checked)} />
+            </div>
+          )}
 
-            {can('toggle-disabled', agent) && (
-              <div className="flex items-center gap-2 border border-border rounded-lg px-3 h-9 bg-background select-none">
-                <span className="text-xs text-muted-foreground font-semibold">Enabled</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={!agent.disabled}
-                    onChange={() => setItemDisabled('agent', agent.id, !agent.disabled)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-8 h-4 bg-muted/80 rounded-full peer peer-focus:ring-1 peer-focus:ring-primary/20 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary relative"></div>
-                </label>
-              </div>
-            )}
+          {/* Visibility Popover (Owner/SA) */}
+          {can('set-visibility', agent) && (
+            <div className="relative">
+              <button 
+                onClick={() => setIsVisibilityOpen(!isVisibilityOpen)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
+              >
+                <Globe className="w-3.5 h-3.5 text-gray-500" />
+                Visibility
+              </button>
+              {isVisibilityOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsVisibilityOpen(false)}></div>
+                  <div className="absolute right-0 mt-1.5 w-64 bg-white border border-gray-200 rounded-md p-4 shadow-floating z-50">
+                    <h4 className="text-xs font-bold text-gray-800 mb-2.5 border-b pb-1.5">Visibility settings</h4>
+                    
+                    <div className="flex items-center justify-between text-xs mb-3">
+                      <span className="font-semibold text-gray-600">Public (Global)</span>
+                      <input 
+                        type="checkbox" 
+                        checked={agent.visibility?.global || false} 
+                        onChange={(e) => setItemVisibility('agent', agent.id, {
+                          global: e.target.checked,
+                          workspaceIds: agent.visibility?.workspaceIds || []
+                        })}
+                        className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                      />
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Workspaces Share</span>
+                      <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                        {workspaces.map(ws => {
+                          const isChecked = agent.visibility?.workspaceIds?.includes(ws.id) || false;
+                          return (
+                            <label key={ws.id} className="flex items-center gap-2 text-xs p-1 hover:bg-gray-55 rounded cursor-pointer">
+                              <input 
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  const list = agent.visibility?.workspaceIds || [];
+                                  const nextList = e.target.checked 
+                                    ? [...list, ws.id]
+                                    : list.filter(wId => wId !== ws.id);
+                                  setItemVisibility('agent', agent.id, {
+                                    global: agent.visibility?.global || false,
+                                    workspaceIds: nextList
+                                  });
+                                }}
+                                className="rounded border-gray-300 text-primary focus:ring-primary"
+                              />
+                              <span className="truncate font-semibold text-gray-700">{ws.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
-            <Button
-              onClick={() => toast.success(`Simulating calling agent ${agent.name}...`)}
-              className="h-9 px-4 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/95 rounded-lg border border-transparent shadow-sm cursor-pointer"
+          {/* Edit (Owner conditionally/SA always) */}
+          {showEditButton && (
+            <button
+              onClick={() => setIsEditOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
             >
-              Call agent
-            </Button>
-          </>
-        }
-      />
+              <Edit className="w-3.5 h-3.5" />
+              Edit
+            </button>
+          )}
 
-      {/* Status Pill Card */}
-      <StatusPillCard pills={statusPills} />
+          {/* Disabled Delete Button */}
+          <button
+            disabled
+            className="px-2.5 py-1 text-xs font-semibold rounded bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+            title="Deletions must be requested — use Request deletion"
+          >
+            Delete
+          </button>
 
-      {/* Detail Tabs */}
-      <DetailTabs
-        tabs={tabs}
-        activeTab={activeTab}
-        onChange={handleTabChange}
-      />
+          {/* Actionable deletion requests for Owner only */}
+          {isOwner && (
+            agent.deletionRequested ? (
+              <button
+                onClick={handleCancelDelReq}
+                className="px-2.5 py-1 text-xs font-semibold rounded bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 cursor-pointer focus:outline-none"
+              >
+                Cancel Deletion
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsDelReqOpen(true)}
+                className="px-2.5 py-1 text-xs font-semibold rounded bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer focus:outline-none"
+              >
+                Request Deletion
+              </button>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* 7 Detail Tabs Strip */}
+      <div className="px-6 border-b border-gray-200 bg-white select-none">
+        <div className="flex items-center gap-6 overflow-x-auto">
+          {[
+            { key: 'overview', label: 'Overview' },
+            { key: 'skills', label: `Skills (${agent.skillRefs?.length || 0})` },
+            { key: 'audit-log', label: 'Audit Log' },
+            { key: 'health-status', label: 'Health status' },
+            { key: 'integration', label: 'Integrations' },
+            { key: 'security', label: 'Security' },
+            { key: 'version', label: 'Version' }
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => handleTabChange(tab.key)}
+              className={`py-3 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap focus:outline-none ${
+                activeTab === tab.key 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Tab Contents */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <SubTabs
-            tabs={[
-              { key: 'info', label: 'Capability Overview' },
-              { key: 'connection', label: 'Connection & Publisher' },
-              { key: 'registry', label: 'Registry & Compliance' }
-            ]}
-            activeTab={overviewSubTab}
-            onChange={(key) => setOverviewSubTab(key as any)}
-          />
-
-          {overviewSubTab === 'info' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 select-none">
-                <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                  <div className="text-[12px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">Calls (30d)</div>
-                  <div className="text-2xl font-bold tabular-nums text-foreground">
-                    {agent.totalCalls30d.toLocaleString()}
-                  </div>
-                </Card>
-                <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                  <div className="text-[12px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">Success Rate</div>
-                  <div className="text-2xl font-bold tabular-nums text-emerald-600">
-                    {agent.successRatePct.toFixed(1)}%
-                  </div>
-                </Card>
-                <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                  <div className="text-[12px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">Response Latency</div>
-                  <div className="text-2xl font-bold tabular-nums text-foreground">
-                    {agent.avgResponseMs}ms
-                  </div>
-                </Card>
+      <div className="p-6">
+        
+        {/* Tab 1: Overview */}
+        {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+            {/* Left Column (~2/3) */}
+            <div className="xl:col-span-2 space-y-6">
+              {/* Description Card */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 select-none">Agent Autonomy & Capabilities</h3>
+                <p className="text-xs text-gray-600 leading-relaxed mb-4">{agent.description}</p>
+                
+                {/* Capabilities badges */}
+                <div className="flex flex-wrap gap-2 select-none">
+                  {Object.entries(agent.capabilityToggles || {}).map(([key, val]) => (
+                    <span key={key} className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded border ${
+                      val 
+                        ? 'bg-purple-50 text-purple-700 border-purple-100'
+                        : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                    }`}>
+                      {key}
+                    </span>
+                  ))}
+                  <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
+                    {agent.skillRefs?.length || 0} skills referenced
+                  </span>
+                </div>
               </div>
 
-              <ChartCard
-                type="line"
-                title="Usage & Success Rate — last 12 weeks"
-                data={chartData}
-                yAxisRight={true}
-                series={[
-                  { key: 'Calls', stroke: 'oklch(0.2657 0.1001 279.46)', yAxisId: 'left' },
-                  { key: 'Success Rate', stroke: 'oklch(0.60 0.15 150)', dashed: true, yAxisId: 'right' },
-                ]}
-              />
+              {/* Connection & Publisher Specs */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Connection & Publisher Specs</h3>
+                <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-6 text-xs pt-1">
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Declared Endpoint</dt>
+                    <dd className="font-mono bg-gray-50 border p-1 px-2 rounded text-gray-700 truncate select-all">{agent.tech?.endpoint || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Gateway Route URL</dt>
+                    <dd className="font-mono bg-gray-50 border p-1 px-2 rounded text-gray-700 truncate select-all">{agent.tech?.gatewayUrl || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Publisher Identity</dt>
+                    <dd className="font-bold text-gray-700">{agent.publisher?.name || 'Community'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Publisher Email Contact</dt>
+                    <dd className="font-mono text-gray-700 select-all">{agent.publisher?.email || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Authorization Method</dt>
+                    <dd className="font-semibold text-gray-700 uppercase">{agent.tech?.authType || 'none'}</dd>
+                  </div>
+                  {agent.tech?.authType === 'api-key' && (
+                    <>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">API Key Header Name</dt>
+                        <dd className="font-mono text-gray-700">{(agent.tech as any).apiKeyHeaderName || 'X-API-Key'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Key Format Pattern</dt>
+                        <dd className="font-mono text-gray-700">{(agent.tech as any).apiKeyFormat || '—'}</dd>
+                      </div>
+                    </>
+                  )}
+                  {agent.tech?.authType === 'oauth2' && (
+                    <>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Authorization URL</dt>
+                        <dd className="font-mono text-gray-700">{(agent.tech as any).authorizationUrl || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Token URL</dt>
+                        <dd className="font-mono text-gray-700">{(agent.tech as any).tokenUrl || '—'}</dd>
+                      </div>
+                      <div className="md:col-span-2">
+                        <dt className="text-gray-400 font-semibold mb-1">Scopes</dt>
+                        <dd className="font-mono text-gray-700">{(agent.tech as any).scopes || '—'}</dd>
+                      </div>
+                    </>
+                  )}
+                  {agent.tech?.authType === 'bearer' && (
+                    <>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Token Endpoint</dt>
+                        <dd className="font-mono text-gray-700">{(agent.tech as any).tokenEndpoint || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-400 font-semibold mb-1">Refresh URL</dt>
+                        <dd className="font-mono text-gray-700">{(agent.tech as any).refreshUrl || '—'}</dd>
+                      </div>
+                    </>
+                  )}
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Transport Medium</dt>
+                    <dd className="font-semibold text-gray-700 uppercase">{agent.tech?.transport || 'http'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-semibold mb-1">Protocol Version</dt>
+                    <dd className="font-mono text-gray-700">{agent.tech?.protocolVersion || '1.0.0'}</dd>
+                  </div>
+                </dl>
+              </div>
 
-              <Card className="bg-card border-border rounded-xl shadow-none p-5">
-                <h3 className="text-sm font-bold text-foreground mb-3">Capabilities & Features</h3>
-                <div className="space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    <div className="flex items-center gap-2 border border-border/80 bg-muted/20 px-3 py-1.5 rounded-lg text-xs text-foreground font-semibold">
-                      <Sparkles className="size-4 text-primary" />
-                      <span>{agentSkills.length} Skills Exposed</span>
-                    </div>
-                  </div>
-                  <div className="pt-2 border-t border-border/40">
-                    <div className="text-[10px] font-bold text-foreground uppercase tracking-wider mb-2 select-none">Configured Capabilities</div>
-                    <div className="flex flex-wrap gap-2 select-none">
-                      {capabilityToggles.map((cap) => {
-                        const isEnabled = agent.capabilities?.[cap.key] ?? false;
-                        return (
-                          <span
-                            key={cap.key}
-                            className={`text-[11px] px-2.5 py-1 rounded-full font-semibold border ${
-                              isEnabled
-                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                : 'bg-muted text-muted-foreground border-border'
-                            }`}
-                          >
-                            {cap.label}: {isEnabled ? 'Active' : 'Inactive'}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
+              {/* Uptime Stat cards */}
+              <div className="grid grid-cols-3 gap-4 select-none">
+                <StatCard label="Response Success Rate" value={`${agent.successRatePct || 100}%`} subtext="Past 30 days execution calls" />
+                <StatCard label="Avg Response Latency" value={`${agent.avgResponseMs || 0}ms`} subtext="Average workflow completion delay" />
+                <StatCard label="Total calls (30d)" value={agent.totalCalls30d?.toLocaleString() || '0'} subtext="Aggregate request response counts" />
+              </div>
+
+              {/* Weekly Telemetry calls Chart */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 select-none">Agent Execution & Call History (30d)</h3>
+                <div className="h-44 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="week" stroke="#9ca3af" fontSize={10} tickLine={false} />
+                      <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="calls" stroke="var(--chart-2)" fill="var(--chart-2)" fillOpacity={0.08} strokeWidth={1.5} />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
-              </Card>
+              </div>
             </div>
-          )}
 
-          {overviewSubTab === 'connection' && (
-            <Card className="bg-card border-border rounded-xl shadow-none p-6 space-y-4">
-              <h3 className="text-sm font-bold text-foreground">Connection & Publisher Information</h3>
-              <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-xs">
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Agent Endpoint</dt>
-                  <dd className="font-mono bg-muted p-1 px-2 rounded text-foreground select-all inline-block truncate max-w-full">
-                    {agentEndpoint}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Gateway URL</dt>
-                  <dd className="font-mono bg-muted p-1 px-2 rounded text-foreground select-all inline-block truncate max-w-full">
-                    {gatewayUrl}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Publisher Name</dt>
-                  <dd className="font-semibold text-foreground">{agent.publisher}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Publisher Contact</dt>
-                  <dd className="font-mono text-foreground">{agent.publisher.toLowerCase().replace(' ', '')}@registry.org</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Authentication Type</dt>
-                  <dd className="font-semibold text-foreground">OAuth 2.0 / Token Auth</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-medium mb-1">Protocol Version</dt>
-                  <dd className="font-mono text-foreground">A2A 1.0.0 (Standard)</dd>
-                </div>
-              </dl>
-            </Card>
-          )}
-
-          {overviewSubTab === 'registry' && (
-            <Card className="bg-card border-border rounded-xl shadow-none p-6 space-y-4">
-              <h3 className="text-sm font-bold text-foreground">Registry Registry Compliance</h3>
-              <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-xs font-mono">
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">Compliance Status</dt>
-                  <dd className="font-sans font-semibold text-emerald-600">Fully Compliant</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">Submitted Date</dt>
-                  <dd className="text-foreground">{formatDate(agent.registeredAt)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">Last Updated</dt>
-                  <dd className="text-foreground">{formatDate(agent.updatedAt)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground font-sans font-medium mb-1">License</dt>
-                  <dd className="font-sans font-semibold text-foreground">MIT License</dd>
-                </div>
-              </dl>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'skills' && (
-        <SmartTable
-          searchPlaceholder="Search skills..."
-          searchKeys={['name', 'description']}
-          columns={[
-            {
-              key: 'name',
-              header: 'Name',
-              className: 'w-[220px] py-2',
-              render: (row) => (
-                <Link to={`/skills/${row.id}`} className="font-semibold text-primary hover:underline select-all">
-                  {row.name}
-                </Link>
-              )
-            },
-            {
-              key: 'description',
-              header: 'Description',
-              render: (row) => <span className="text-muted-foreground">{row.description}</span>
-            },
-            {
-              key: 'version',
-              header: 'Skill Version',
-              className: 'w-[120px] font-mono text-center',
-              render: (row) => <span>v{row.version}</span>
-            },
-            {
-              key: 'action',
-              header: 'Status',
-              className: 'w-[100px] text-center',
-              render: (row) => (
-                <div className="flex justify-center">
-                  <EnableToggle itemKey={agent.id} capabilityKind="skill" capabilityName={row.id} />
-                </div>
-              )
-            },
-            {
-              key: 'test',
-              header: 'Test',
-              className: 'w-[80px] text-center',
-              render: (row) => <TestButton name={row.name} kind="skill" />
-            }
-          ]}
-          rows={agentSkills}
-        />
-      )}
-
-      {activeTab === 'audit-log' && (
-        <SmartTable
-          searchPlaceholder="Search logs..."
-          searchKeys={['whatUpdated', 'updatedBy', 'auditorRemark']}
-          columns={[
-            { key: 'status', header: 'Status' },
-            { key: 'whatUpdated', header: 'Change' },
-            { key: 'updatedBy', header: 'Actor' },
-            { key: 'auditorRemark', header: 'Auditor Remark' },
-            { key: 'date', header: 'Date' }
-          ]}
-          rows={agent.auditLogs || [
-            { id: 'a1', status: 'Healthy', whatUpdated: 'Version bumped to v1.2.0', updatedBy: 'system@registry.org', auditorRemark: 'Automatic build checks complete.', date: agent.updatedAt }
-          ]}
-          renderRow={(row, rIdx, cols) => (
-            <TableRow key={row.id || rIdx} className="hover:bg-transparent border-0">
-              <TableCell colSpan={cols.length} className="p-2 border-0">
-                <div className="border border-border/80 rounded-xl p-4 bg-card shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-2 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full border border-border/50 ${
-                        row.status.toLowerCase() === 'approved' || row.status.toLowerCase() === 'healthy'
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                      }`}>
-                        <span className={`size-1.5 rounded-full ${row.status.toLowerCase() === 'approved' || row.status.toLowerCase() === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                        <span>{row.status}</span>
-                      </span>
-                      <span className="text-xs font-mono text-muted-foreground select-all">{row.updatedBy}</span>
-                    </div>
-                    <h4 className="text-[13.5px] font-semibold text-foreground">{row.whatUpdated}</h4>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{row.auditorRemark}</p>
+            {/* Right Column (~1/3) */}
+            <div className="space-y-6">
+              {/* StatusPillCard */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Operational State</h3>
+                <div className="grid grid-cols-2 gap-4 text-xs">
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Health Status</span>
+                    <HealthDot status={getHealthDisplay(agent)} showLabel />
                   </div>
-                  <div className="flex items-center gap-3 shrink-0 self-end sm:self-center select-none">
-                    <span className="text-xs text-muted-foreground font-mono">{formatDateTime(row.date)}</span>
-                    <button
-                      onClick={() => setSelectedAudit(row)}
-                      className="h-8 px-3 rounded border border-border bg-background hover:bg-accent text-xs font-semibold cursor-pointer"
-                    >
-                      View
-                    </button>
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Approval State</span>
+                    <span className={`inline-block font-semibold px-2 py-0.5 rounded-full border text-[11px] badge-status-${agent.status}`}>
+                      {agent.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Autonomy Level</span>
+                    <span className="font-bold text-gray-700">{agent.autonomy || 'Low'}</span>
+                  </div>
+                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/40">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Transport</span>
+                    <span className="font-bold font-mono text-gray-700 uppercase">{agent.tech?.transport || 'http'}</span>
                   </div>
                 </div>
-              </TableCell>
-            </TableRow>
-          )}
-        />
-      )}
+              </div>
 
-      {activeTab === 'health-status' && (
-        <SmartTable
-          searchPlaceholder="Search health checks..."
-          searchKeys={['status', 'performedBy']}
-          columns={[
-            {
-              key: 'timestamp',
-              header: 'Timestamp',
-              className: 'font-mono py-2 w-[220px]',
-              render: (row) => <span>{formatDateTime(row.timestamp)}</span>
-            },
-            {
-              key: 'status',
-              header: 'Status',
-              className: 'w-[120px]',
-              render: (row) => {
-                const isHealthy = row.status === 'healthy';
-                return (
-                  <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                    isHealthy ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
-                  }`}>
-                    <span className={`size-1.5 rounded-full ${isHealthy ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                    <span className="uppercase text-[9px]">{row.status}</span>
-                  </span>
-                );
-              }
-            },
-            {
-              key: 'performedBy',
-              header: 'Performed By',
-              className: 'font-mono text-muted-foreground select-all',
-              render: (row) => <span>{row.performedBy}</span>
-            },
-            {
-              key: 'responseTimeMs',
-              header: 'Response Time',
-              className: 'font-mono tabular-nums text-right w-[140px] pr-4',
-              render: (row) => <span className="font-semibold text-foreground">{row.responseTimeMs} ms</span>
-            }
-          ]}
-          rows={agent.healthChecks || [
-            { timestamp: agent.updatedAt, status: agentHealth, performedBy: 'healthcheck-daemon@registry.org', responseTimeMs: agent.avgResponseMs }
-          ]}
-        />
-      )}
-
-      {activeTab === 'integration' && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between select-none">
-            <span className="text-xs font-bold text-foreground uppercase tracking-wider">Client Platform Sample</span>
-            <div className="flex items-center gap-1.5 p-0.5 rounded-lg bg-muted border border-border/40">
-              <button
-                onClick={() => setIntegrationLang('ts')}
-                className={`text-[11px] font-semibold py-1 px-3 rounded-md transition-all cursor-pointer ${
-                  integrationLang === 'ts' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-                }`}
-              >
-                TypeScript
-              </button>
-              <button
-                onClick={() => setIntegrationLang('python')}
-                className={`text-[11px] font-semibold py-1 px-3 rounded-md transition-all cursor-pointer ${
-                  integrationLang === 'python' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-                }`}
-              >
-                Python
-              </button>
+              {/* Registry & compliance card */}
+              <div className="bg-white border border-gray-200 rounded-md p-5 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Registry & Compliance</h3>
+                <dl className="space-y-3.5 text-xs font-mono">
+                  <div>
+                    <dt className="text-gray-400 font-sans font-semibold mb-0.5">Registered Timestamp</dt>
+                    <dd className="text-gray-700 font-sans font-medium">{new Date(agent.registeredAt).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-sans font-semibold mb-0.5">Last Config Update</dt>
+                    <dd className="text-gray-700 font-sans font-medium">{new Date(agent.updatedAt).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400 font-sans font-semibold mb-0.5">License Policy Type</dt>
+                    <dd className="text-gray-700 font-sans font-bold">{agent.license}</dd>
+                  </div>
+                </dl>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Prerequisites */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Prerequisites</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Install the agent messaging SDK to handle communication envelopes:
-            </p>
-            <CopyBlock code={cliInstall} />
-          </Card>
+        {/* Tab 2: Skills list */}
+        {activeTab === 'skills' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4">
+            <SmartTable 
+              data={agentSkills}
+              columns={[
+                {
+                  key: 'name',
+                  header: 'Name',
+                  sortable: true,
+                  render: (row) => (
+                    <Link to={`/skills/${row.id}`} className="text-primary hover:underline font-bold">
+                      {row.name}
+                    </Link>
+                  )
+                },
+                {
+                  key: 'description',
+                  header: 'Description',
+                  render: (row) => <span className="text-gray-500">{row.description}</span>
+                },
+                {
+                  key: 'version',
+                  header: 'Version',
+                  render: (row) => <span className="font-mono-custom text-gray-400">v{row.version}</span>
+                },
+                {
+                  key: 'actions',
+                  header: 'Action',
+                  render: (row: any) => (
+                    <button
+                      onClick={() => {
+                        setSelectedTestSkill(row.id);
+                        setTestInput('');
+                        setTestResult(null);
+                        setTestStatus(null);
+                        setIsTestDialogOpen(true);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
+                    >
+                      <Play className="w-3 h-3 text-gray-400" />
+                      Test
+                    </button>
+                  )
+                }
+              ]}
+            />
+          </div>
+        )}
 
-          {/* Endpoint Reference */}
-          <Card className="bg-card border-border rounded-xl shadow-none overflow-hidden">
-            <CardHeader className="p-5 pb-3 border-b border-border bg-muted/20 select-none">
-              <CardTitle className="text-xs font-bold text-foreground uppercase tracking-wider">Endpoint Gateway Reference</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0 divide-y divide-border/60 font-mono text-[12px]">
-              {[
-                { method: 'GET', endpoint: `.well-known/agent-card.json`, purpose: 'Query public registration metadata card.' },
-                { method: 'POST', endpoint: `message/send`, purpose: 'Send query message to agent coordinator.' },
-                { method: 'POST', endpoint: `message/stream`, purpose: 'Initiate server-sent events SSE messaging stream.' },
-                { method: 'POST', endpoint: `tasks/get`, purpose: 'Query current background queue task details.' },
-                { method: 'POST', endpoint: `tasks/cancel`, purpose: 'Terminate a currently running workflow task.' }
-              ].map((routeItem, idx) => (
-                <div key={idx} className="p-4 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary font-bold text-[10px]">
-                      {routeItem.method}
-                    </span>
-                    <span className="text-foreground font-semibold select-all">{agentEndpoint.replace(/https?:\/\/[^\/]+/, '')}/{routeItem.endpoint}</span>
+        {/* Tab 3: Audit Log */}
+        {activeTab === 'audit-log' && (
+          <div className="space-y-4">
+            {agent.auditRecords?.length === 0 ? (
+              <EmptyState description="No compliance logs exist for this agent." />
+            ) : (
+              agent.auditRecords?.map((record, idx) => (
+                <div 
+                  key={idx} 
+                  onDoubleClick={() => setSelectedAuditRecord(record)}
+                  title="Double click to view configuration diff"
+                  className="bg-white border border-gray-200 rounded-md p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm hover:border-gray-300 cursor-pointer select-none transition-colors"
+                >
+                  <div className="space-y-1.5 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 rounded-full uppercase leading-none">
+                        {record.healthStatus}
+                      </span>
+                      <span className="text-[11px] text-gray-400 font-mono-custom select-all">{record.updatedBy}</span>
+                    </div>
+                    <h4 className="text-xs font-bold text-gray-800">{record.whatChanged}</h4>
+                    <p className="text-xs text-gray-500">{record.remark}</p>
                   </div>
-                  <span className="text-muted-foreground font-sans text-xs">{routeItem.purpose}</span>
+                  <div className="shrink-0 flex items-center gap-4 self-end md:self-center">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setSelectedAuditRecord(record); }}
+                      className="text-[11px] text-primary hover:underline font-bold bg-gray-50 px-2.5 py-1 border border-gray-200 rounded cursor-pointer"
+                    >
+                      View changes
+                    </button>
+                    <span className="text-[10px] text-gray-400 font-mono-custom">{new Date(record.editedAt).toLocaleDateString()}</span>
+                  </div>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
+              ))
+            )}
+          </div>
+        )}
 
-          {/* Required Headers */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-2 select-none">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Required Request Headers</h3>
-            <div className="font-mono text-[12px] bg-muted/65 p-3 rounded-lg border border-border/40 text-foreground space-y-1.5">
-              <div>Content-Type: application/json</div>
-              <div>Authorization: Bearer mock_access_token_su_2026</div>
+        {/* Tab 4: Health status */}
+        {activeTab === 'health-status' && (
+          <div className="space-y-4">
+            <div className="bg-white border border-gray-200 rounded-md p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm select-none">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-gray-800">System Telemetry & Health Verification</h3>
+                <p className="text-xs text-gray-500">Perform real-time status and security scan checklist on the endpoint.</p>
+                {currentUser?.role === 'super_admin' && (
+                  <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={simulateFail} 
+                      onChange={(e) => setSimulateFail(e.target.checked)}
+                      disabled={isCheckingHealth}
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    <span className="text-xs text-red-600 font-semibold">Simulate failing the scan (updates success rate & healthDot to Unhealthy)</span>
+                  </label>
+                )}
+              </div>
+              <button
+                onClick={handleRunHealthCheck}
+                disabled={isCheckingHealth}
+                className={`px-4 py-2 text-xs font-bold rounded cursor-pointer transition-all shrink-0 ${
+                  isCheckingHealth 
+                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-wait'
+                    : 'bg-primary text-primary-foreground hover:opacity-95'
+                }`}
+              >
+                {isCheckingHealth ? 'Running health check...' : 'Run health check'}
+              </button>
             </div>
-          </Card>
 
-          {/* Code Example */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Connection Code Sample</h3>
-            <CopyBlock code={codeExample} />
-          </Card>
-
-          {/* Example Response */}
-          <Card className="bg-card border-border rounded-xl shadow-none overflow-hidden">
-            <CardHeader className="p-5 pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between select-none">
-              <CardTitle className="text-xs font-bold text-foreground uppercase tracking-wider">Response Samples</CardTitle>
-              <SubTabs
-                tabs={[
-                  { key: 'success', label: 'Success' },
-                  { key: 'errors', label: 'Common Errors' },
-                  { key: 'format', label: 'Error Format' }
+            <div className="bg-white border border-gray-200 rounded-md p-4 shadow-sm">
+              <SmartTable 
+                data={(agent.healthChecks || []).map((hc: any, idx: number) => ({ ...hc, id: idx }))}
+                columns={[
+                  {
+                    key: 'timestamp',
+                    header: 'Timestamp',
+                    render: (row: any) => <span className="font-mono-custom text-gray-550">{new Date(row.timestamp).toLocaleString()}</span>
+                  },
+                  {
+                    key: 'status',
+                    header: 'Status',
+                    render: (row: any) => {
+                      const isHealthy = row.status === 'healthy';
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-bold ${
+                          isHealthy ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isHealthy ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                          {row.status.toUpperCase()}
+                        </span>
+                      );
+                    }
+                  },
+                  {
+                    key: 'performedBy',
+                    header: 'Performed By',
+                    render: (row: any) => <span className="font-mono-custom text-gray-400">{row.performedBy}</span>
+                  },
+                  {
+                    key: 'responseMs',
+                    header: 'Response time',
+                    render: (row: any) => <span className="font-semibold text-gray-700 font-mono-custom">{row.responseMs} ms</span>
+                  }
                 ]}
-                activeTab={responseSubTab}
-                onChange={(key) => setResponseSubTab(key as any)}
               />
-            </CardHeader>
-            <CardContent className="p-5">
-              {responseSubTab === 'success' && <CopyBlock code={successResponse} />}
-              {responseSubTab === 'errors' && <CopyBlock code={commonErrors} />}
-              {responseSubTab === 'format' && <CopyBlock code={errorFormat} />}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {activeTab === 'security' && (
-        <div className="space-y-6">
-          {/* Header Verify Badges */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 select-none flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-foreground">Verified Integration Grade</h3>
-              <p className="text-xs text-muted-foreground">Detailed scan checklist for security clearances.</p>
             </div>
-            <div className="flex items-center gap-2">
-              <VerifiedBadge />
-              <ScanGrade score={agent.trust.score} />
-              <span className="inline-flex items-center text-[11px] font-mono font-bold bg-muted border px-2 py-0.5 rounded-full text-foreground">
-                Risk: {(1 - agent.trust.score / 100).toFixed(2)}
-              </span>
-            </div>
-          </Card>
+          </div>
+        )}
 
-          {/* Security audits SmartTable */}
-          <SmartTable
-            columns={[
-              {
-                key: 'rule',
-                header: 'Audit Rule',
-                className: 'font-semibold text-foreground py-2',
-                render: (row) => <span>{row.rule}</span>
-              },
-              {
-                key: 'severity',
-                header: 'Severity',
-                className: 'w-[100px] text-center',
-                render: (row) => {
-                  const isHigh = row.severity === 'High';
-                  return (
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${
-                      isHigh ? 'bg-red-500/10 text-red-600 border-red-500/20' : 'bg-muted text-muted-foreground border-border'
-                    }`}>
-                      {row.severity}
-                    </span>
-                  );
-                }
-              },
-              {
-                key: 'status',
-                header: 'Status',
-                className: 'w-[100px] text-center',
-                render: (row) => {
-                  const pass = row.status === 'pass';
-                  const warn = row.status === 'warn';
-                  return (
-                    <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                      pass ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : warn ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-red-50 text-red-700 border-red-200'
-                    }`}>
-                      <span className={`size-1.5 rounded-full ${pass ? 'bg-emerald-500' : warn ? 'bg-amber-500' : 'bg-red-500'}`} />
-                      <span className="uppercase text-[9px]">{row.status}</span>
-                    </span>
-                  );
-                }
-              },
-              {
-                key: 'detail',
-                header: 'Verification Detail',
-                render: (row) => <span className="text-muted-foreground">{row.detail}</span>
-              }
-            ]}
-            rows={securityRules}
-          />
-
-          {/* Declared permissions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3 select-none">
-              <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Declared Sandbox Permissions</h3>
-              <div className="space-y-2">
+        {/* Tab 5: Integration */}
+        {activeTab === 'integration' && (
+          <div className="space-y-6">
+            <div className="bg-white border border-gray-200 rounded-md p-5 space-y-4">
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider select-none">Agent A2A API Handshakes</h4>
+              <div className="divide-y divide-gray-100 border-t pt-2">
                 {[
-                  { name: 'Network Communications Outbound', allow: true },
-                  { name: 'Environment Variables Reading', allow: false },
-                  { name: 'Local File Directory Access', allow: false }
-                ].map((perm, pIdx) => (
-                  <div key={pIdx} className="flex items-center justify-between text-xs py-1 border-b border-border/50 last:border-0">
-                    <span className="font-medium text-foreground">{perm.name}</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase ${
-                      perm.allow
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                        : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
-                    }`}>
-                      {perm.allow ? 'ALLOW' : 'DENY'}
-                    </span>
+                  { m: 'GET', r: '.well-known/agent-card.json', d: 'Query metadata and capability profile of the agent' },
+                  { m: 'POST', r: 'message/send', d: 'Send transactional commands or conversation texts' },
+                  { m: 'POST', r: 'message/stream', d: 'Open server-sent event socket stream' },
+                  { m: 'POST', r: 'tasks/get', d: 'Retrieve active task queues and threads logs' },
+                  { m: 'POST', r: 'tasks/cancel', d: 'Kill ongoing task cycles directly' }
+                ].map((api, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-xs py-3.5 border-b border-gray-100 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className="bg-purple-50 text-purple-700 border border-purple-200 font-bold px-1.5 py-0.5 rounded font-mono-custom text-[10px]">
+                        {api.m}
+                      </span>
+                      <span className="font-mono-custom font-semibold text-gray-700">/{api.r}</span>
+                    </div>
+                    <span className="text-gray-400 text-[11px]">{api.d}</span>
                   </div>
                 ))}
               </div>
-            </Card>
-
-            {/* Auth Posture */}
-            <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3 select-none">
-              <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Authentication Posture</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Connects through OAuth client credentials. Access tokens expire after 3600 seconds and are automatically refreshed. No personal developer keys are stored inside this service context.
-              </p>
-            </Card>
-          </div>
-
-          {/* Scan History */}
-          <Card className="bg-card border-border rounded-xl shadow-none p-5 space-y-3 select-none">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Scan Clearance History</h3>
-            <div className="space-y-3 font-mono text-xs">
-              {[
-                { date: '2026-07-01', score: agent.trust.score, grade: 'A' },
-                { date: '2026-06-15', score: Math.max(agent.trust.score - 2, 70), grade: 'B' },
-                { date: '2026-05-18', score: Math.max(agent.trust.score - 4, 70), grade: 'B' }
-              ].map((hist, hIdx) => (
-                <div key={hIdx} className="flex items-center justify-between border-b border-border/40 pb-2 last:border-0 last:pb-0">
-                  <span className="text-muted-foreground">{hist.date}</span>
-                  <div className="flex items-center gap-4">
-                    <span className="text-foreground font-semibold">Score: {hist.score}</span>
-                    <span className="font-sans font-bold bg-primary/10 text-primary px-2 py-0.5 rounded text-[10px]">
-                      GRADE {hist.grade}
-                    </span>
-                  </div>
-                </div>
-              ))}
             </div>
-          </Card>
+
+            <div className="bg-white border border-gray-200 rounded-md p-5 space-y-3">
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider select-none">Client Connection Code</h4>
+              <CopyBlock 
+                code={
+                  `import requests\n\nurl = "${agent.tech?.endpoint || 'http://localhost:5000/agent'}/message/send"\nheaders = {"Authorization": "Bearer token"}\npayload = {"message": "Reconcile June invoice reports"}\n\nresponse = requests.post(url, json=payload, headers=headers)\nprint(response.json())`
+                } 
+                language="python"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Tab 6: Security */}
+        {activeTab === 'security' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4 select-none">
+              <StatCard label="Security grade" value={getHealthDisplay(agent) === 'Healthy' ? 'A' : 'B'} subtext={`Scanned score: ${agent.trust?.score || 85}`} />
+              <StatCard label="Autonomy guardrails" value="Active" subtext="Tool sandboxing policies matching high tier rules" />
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-md p-5 space-y-3">
+              <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider select-none">Declared Permissions Checklist</h4>
+              <div className="divide-y divide-gray-100 text-xs border-t pt-2 space-y-2">
+                {[
+                  { name: 'Executes nested MCP Server tools', val: 'ALLOW' },
+                  { name: 'Allocates dynamic memory index store', val: 'ALLOW' },
+                  { name: 'Establishes direct sockets to agent collaborations', val: 'DENY' }
+                ].map((item, idx) => (
+                  <div key={idx} className="flex justify-between py-1.5">
+                    <span className="font-semibold text-gray-700">{item.name}</span>
+                    <span className={`font-bold text-[10px] px-2 py-0.5 rounded-full border ${
+                      item.val === 'ALLOW' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+                    }`}>{item.val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 7: Version */}
+        {activeTab === 'version' && (
+          <div className="bg-white border border-gray-200 rounded-md p-4">
+            <SmartTable 
+              data={(agent.versions || []).map((v: any) => ({ ...v, id: v.version }))}
+              columns={[
+                {
+                  key: 'version',
+                  header: 'Version',
+                  render: (row: any) => <span className="font-mono-custom font-bold text-gray-800">v{row.version}</span>
+                },
+                {
+                  key: 'date',
+                  header: 'Published',
+                  render: (row: any) => <span className="font-mono-custom text-gray-500">{new Date(row.date).toLocaleDateString()}</span>
+                },
+                {
+                  key: 'changelog',
+                  header: 'Changelog Notes',
+                  render: (row: any) => <div className="text-gray-500 prose leading-relaxed max-w-lg" dangerouslySetInnerHTML={{ __html: row.changelog }} />
+                },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  render: (row: any) => <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{row.status.toUpperCase()}</span>
+                },
+                {
+                  key: 'active',
+                  header: 'Active',
+                  render: (row: any) => row.active ? <span className="text-emerald-600 font-bold">Live Active</span> : <span className="text-gray-400">Archived</span>
+                }
+              ]}
+            />
+          </div>
+        )}
+
+      </div>
+
+      {/* Edit Config Modal */}
+      {isEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-md bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <form onSubmit={handleSaveEdit}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-55">
+                <h3 className="text-sm font-semibold text-gray-800">Edit Agent Config</h3>
+                <button type="button" onClick={() => setIsEditOpen(false)} className="text-gray-400 font-bold">✕</button>
+              </div>
+              <div className="p-4 space-y-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Agent Name *</label>
+                  <input 
+                    type="text" 
+                    value={editName} 
+                    onChange={e => setEditName(e.target.value)} 
+                    className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Description</label>
+                  <textarea 
+                    value={editDesc} 
+                    onChange={e => setEditDesc(e.target.value)} 
+                    rows={4}
+                    className="w-full px-2.5 py-1.5 border border-gray-255 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
+                <button type="button" onClick={() => setIsEditOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer">Cancel</button>
+                <button type="submit" className="px-3.5 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer">Save Changes</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
-      {activeTab === 'version' && (
-        <VersionsTable
-          versions={[
-            {
-              version: agent.version,
-              date: agent.updatedAt,
-              notes: 'Regular agent logic maintenance and package bumps.',
-              filesCount: agentSkills.length,
-              sizeKb: 18.2,
-              approvalStatus: 'approved'
-            },
-            {
-              version: '1.0.0',
-              date: agent.registeredAt,
-              notes: 'Initial agent registration with the registry.',
-              filesCount: 1,
-              sizeKb: 5.4,
-              approvalStatus: 'approved'
-            }
-          ]}
-          currentVersion={agent.version}
-          compareEnabled={false}
-        />
-      )}
-
-      {/* Audit Detail Modal */}
-      {selectedAudit && (
-        <Dialog open={!!selectedAudit} onOpenChange={(val) => { if (!val) setSelectedAudit(null); }}>
-          <DialogContent className="sm:max-w-[480px] p-6 bg-card border border-border rounded-xl">
-            <DialogHeader className="mb-4">
-              <DialogTitle className="text-base font-bold text-foreground">Audit Record Detail</DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Registry compliance check logged by platform scanners.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 text-xs select-none">
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Audit ID</span>
-                <span className="font-mono text-foreground">{selectedAudit.id}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Registry Status</span>
-                <span className="font-semibold text-foreground uppercase">{selectedAudit.status}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Updated Action</span>
-                <span className="font-semibold text-foreground">{selectedAudit.whatUpdated}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Updated By</span>
-                <span className="font-mono text-foreground">{selectedAudit.updatedBy}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-muted-foreground font-medium">Timestamp</span>
-                <span className="font-mono text-foreground">{formatDateTime(selectedAudit.date)}</span>
-              </div>
-              <div className="space-y-1 pt-1">
-                <span className="text-muted-foreground font-medium">Auditor Remarks</span>
-                <p className="bg-muted/40 p-2.5 rounded-lg border border-border/30 text-foreground font-sans leading-relaxed">
-                  {selectedAudit.auditorRemark}
-                </p>
-              </div>
+      {/* Delete Direct confirm Dialog (SA-only) */}
+      {isDeleteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-sm bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <div className="p-5 text-center space-y-3">
+              <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto" />
+              <h3 className="text-sm font-bold text-gray-800">Directly Delete A2A Agent</h3>
+              <p className="text-xs text-gray-505 leading-relaxed">
+                Are you sure you want to delete "{agent.name}"? This operation executes immediately and produces a ChangeRecord.
+              </p>
             </div>
-            <div className="flex items-center justify-end mt-6 select-none">
-              <Button
-                onClick={() => setSelectedAudit(null)}
-                className="h-9 px-5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/95"
-              >
-                Close
-              </Button>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-55">
+              <button onClick={() => setIsDeleteOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer text-xs font-semibold">Cancel</button>
+              <button onClick={handleDirectDelete} className="px-3.5 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 cursor-pointer text-xs font-semibold">Delete Directly</button>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
-      {/* EDIT DIALOG */}
-      <EditAssetDialog
-        isOpen={isEditOpen}
-        onOpenChange={setIsEditOpen}
-        kind="agent"
-        item={agent}
-        onSave={updates => {
-          updateItem('agent', agent.id, updates);
-        }}
-      />
-
-      {/* DELETE CONFIRM DIALOG */}
-      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-        <DialogContent className="sm:max-w-[420px] p-6 bg-card border border-border rounded-xl select-none">
-          <DialogHeader className="mb-4">
-            <DialogTitle className="text-base font-bold text-foreground">Delete Asset</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Are you sure you want to delete asset "{agent.name}"? This action is reversible.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex items-center justify-end gap-2 pt-4">
-            <Button variant="outline" onClick={() => setIsDeleteOpen(false)} className="h-9 text-xs font-semibold rounded-lg">
-              Cancel
-            </Button>
-            <Button onClick={() => {
-              deleteItem('agent', agent.id);
-              setIsDeleteOpen(false);
-              window.history.back();
-            }} className="h-9 px-5 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-sm">
-              Confirm Delete
-            </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
+
+      {/* Request Deletion confirm Dialog (Owner) */}
+      {isDelReqOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 select-none">
+          <div className="w-full max-w-md bg-white rounded-lg shadow-floating border border-gray-200 overflow-hidden z-50">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-800">Submit Deletion Request</h3>
+              <button type="button" onClick={() => setIsDelReqOpen(false)} className="text-gray-400 font-bold">✕</button>
+            </div>
+            <div className="p-4 space-y-3 text-xs">
+              <p className="text-gray-500">Submit a deletion proposal. A Super Admin must audit and approve this delete before execution.</p>
+              <div>
+                <label className="block font-semibold text-gray-700 mb-1">Reason for Deletion (Optional)</label>
+                <textarea 
+                  value={delReason}
+                  onChange={e => setDelReason(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Agent has been decommissioned..."
+                  className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
+              <button onClick={() => setIsDelReqOpen(false)} className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer text-xs font-semibold">Cancel</button>
+              <button onClick={handleSubmitDelReq} className="px-3.5 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 cursor-pointer text-xs font-semibold">Submit Request</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Audit Log Diff Viewer Modal */}
+      {selectedAuditRecord && (() => {
+        // Generate deterministic before/after configurations
+        const what = (selectedAuditRecord.whatChanged || '').toLowerCase();
+        let diff = {
+          before: null as any,
+          after: {} as any,
+          changedFields: [] as string[]
+        };
+
+        if (what.includes('health') || what.includes('scan')) {
+          diff = {
+            before: {
+              status: "healthy",
+              successRatePct: 99,
+              avgResponseMs: 12,
+              totalCalls30d: agent.totalCalls30d || 140,
+              lastVerified: new Date(new Date(selectedAuditRecord.editedAt).getTime() - 24 * 3600 * 1000).toISOString()
+            },
+            after: {
+              status: "unhealthy",
+              successRatePct: 78,
+              avgResponseMs: 380,
+              totalCalls30d: (agent.totalCalls30d || 140) + 1,
+              lastVerified: selectedAuditRecord.editedAt
+            },
+            changedFields: ['status', 'successRatePct', 'avgResponseMs', 'totalCalls30d', 'lastVerified']
+          };
+        } else if (what.includes('disabled') || what.includes('enabled') || what.includes('toggle')) {
+          const isOff = what.includes('disable') || what.includes('off');
+          diff = {
+            before: {
+              enabled: isOff,
+              updatedAt: new Date(new Date(selectedAuditRecord.editedAt).getTime() - 3600 * 1000).toISOString()
+            },
+            after: {
+              enabled: !isOff,
+              updatedAt: selectedAuditRecord.editedAt
+            },
+            changedFields: ['enabled', 'updatedAt']
+          };
+        } else if (what.includes('registered') || what.includes('create')) {
+          diff = {
+            before: null,
+            after: {
+              name: agent.name,
+              version: agent.version,
+              status: "pending",
+              visibility: "private"
+            },
+            changedFields: ['name', 'version', 'status', 'visibility']
+          };
+        } else {
+          diff = {
+            before: {
+              description: "Initial workspace configurations and capability profiles.",
+              version: "1.0.0",
+              updatedAt: new Date(new Date(selectedAuditRecord.editedAt).getTime() - 12 * 3600 * 1000).toISOString()
+            },
+            after: {
+              description: agent.description,
+              version: agent.version,
+              updatedAt: selectedAuditRecord.editedAt
+            },
+            changedFields: ['description', 'version', 'updatedAt']
+          };
+        }
+
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6 backdrop-blur-sm select-none">
+            <div className="bg-white border border-gray-200 rounded-lg shadow-xl max-w-4xl w-full flex flex-col max-h-[85vh] z-50">
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50 rounded-t-lg">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-800">Audit Configuration Diff</h2>
+                  <p className="text-[11px] text-gray-500 mt-0.5 font-semibold font-mono-custom">
+                    {selectedAuditRecord.whatChanged} · Edited by {selectedAuditRecord.updatedBy}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSelectedAuditRecord(null)}
+                  className="text-gray-400 hover:text-gray-600 text-xs font-semibold px-2.5 py-1 border border-gray-255 rounded bg-white cursor-pointer focus:outline-none"
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Side-by-side panels */}
+              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-0 bg-gray-50/20">
+                {/* Before (Red) */}
+                <div className="border border-red-150 rounded-lg bg-red-50/10 p-4 flex flex-col">
+                  <span className="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-3 block">
+                    Before State (- Removed / Old Value)
+                  </span>
+                  {diff.before ? (
+                    <div className="font-mono text-xs text-gray-700 bg-white border border-red-100 rounded p-3 overflow-auto flex-1 select-all">
+                      {Object.entries(diff.before).map(([key, val]) => {
+                        const isChanged = diff.changedFields.includes(key);
+                        return (
+                          <div key={key} className={`py-0.5 px-1 rounded ${isChanged ? 'bg-red-50 text-red-800 font-semibold line-through' : ''}`}>
+                            <span className="text-gray-400">{key}:</span> {String(val)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-xs text-center py-12 bg-white border border-gray-150 rounded flex-1 flex items-center justify-center font-sans">
+                      — No previous state (New Asset Creation) —
+                    </div>
+                  )}
+                </div>
+
+                {/* After (Green) */}
+                <div className="border border-emerald-150 rounded-lg bg-emerald-50/10 p-4 flex flex-col">
+                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-3 block">
+                    After State (+ Added / Modified Value)
+                  </span>
+                  <div className="font-mono text-xs text-gray-700 bg-white border border-emerald-100 rounded p-3 overflow-auto flex-1 select-all">
+                    {Object.entries(diff.after).map(([key, val]) => {
+                      const isChanged = diff.changedFields.includes(key);
+                      return (
+                        <div key={key} className={`py-0.5 px-1 rounded ${isChanged ? 'bg-emerald-50 text-emerald-800 font-bold' : ''}`}>
+                          <span className="text-gray-400">{key}:</span> {String(val)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Footer */}
+              <div className="px-6 py-3 border-t border-gray-150 bg-gray-50/50 flex justify-end rounded-b-lg">
+                <span className="text-[10px] font-mono-custom text-gray-400 self-center">
+                  Timestamp: {new Date(selectedAuditRecord.editedAt).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Test Dialog */}
+      {isTestDialogOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6 backdrop-blur-sm select-none" onClick={() => setIsTestDialogOpen(false)}>
+          <div className="bg-white border border-gray-255 rounded-lg shadow-xl max-w-xl w-full flex flex-col max-h-[90vh] z-50" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50 rounded-t-lg">
+              <div>
+                <h2 className="text-sm font-bold text-gray-800">Test Agent: {agent.name}</h2>
+                <p className="text-[11px] text-gray-400 mt-0.5 font-semibold">Simulate agent interaction using selected skill reference or direct command.</p>
+              </div>
+              <button 
+                onClick={() => setIsTestDialogOpen(false)}
+                className="text-gray-400 hover:text-gray-600 text-xs font-bold px-2 py-1 border border-transparent rounded focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4 flex-1 overflow-y-auto">
+              <div className="grid grid-cols-1 gap-4">
+                {/* Select Skill */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">Target Skill Reference</label>
+                  <select 
+                    value={selectedTestSkill}
+                    onChange={(e) => setSelectedTestSkill(e.target.value)}
+                    className="w-full text-xs border border-gray-200 rounded p-2 focus:ring-1 focus:ring-primary focus:outline-none bg-white font-semibold text-gray-700"
+                  >
+                    <option value="">Custom / Direct Message (No Skill Ref)</option>
+                    {agentSkills.map((sk: any) => (
+                      <option key={sk.id} value={sk.id}>{sk.name} (v{sk.version})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Input Textarea */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">Test Prompt Input</label>
+                  <textarea 
+                    value={testInput}
+                    onChange={(e) => setTestInput(e.target.value)}
+                    placeholder="Enter message or prompt context to test... (Include 'error' or 'fail' to test execution failure)"
+                    className="w-full h-24 text-xs border border-gray-200 rounded p-2.5 focus:ring-1 focus:ring-primary focus:outline-none font-mono-custom text-gray-700 bg-white"
+                  />
+                </div>
+              </div>
+
+              {/* Simulation Result */}
+              {isRunningTest && (
+                <div className="p-4 border border-dashed rounded bg-gray-50 flex flex-col items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary mb-2"></div>
+                  <span className="text-xs text-gray-400 font-bold">Running skill coordination logic simulation...</span>
+                </div>
+              )}
+
+              {testResult && (
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Simulation Outcome</span>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                      testStatus === 'success' 
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
+                        : 'bg-rose-50 border-rose-300 text-rose-800'
+                    }`}>
+                      {testStatus}
+                    </span>
+                  </label>
+                  <CopyBlock code={JSON.stringify(testResult, null, 2)} language="json" />
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-3 border-t border-gray-150 bg-gray-50/50 flex justify-between items-center rounded-b-lg">
+              <label className="flex items-center gap-1.5 text-xs text-gray-550 select-none cursor-pointer">
+                <input 
+                  type="checkbox"
+                  checked={simulateFail}
+                  onChange={(e) => setSimulateFail(e.target.checked)}
+                  className="rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+                />
+                <span>Simulate Node Failure</span>
+              </label>
+              
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setIsTestDialogOpen(false)}
+                  className="px-3.5 py-1.5 border border-gray-200 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer text-xs font-semibold"
+                >
+                  Close
+                </button>
+                <button
+                  disabled={isRunningTest}
+                  onClick={handleRunTest}
+                  className="px-3.5 py-1.5 rounded bg-primary text-white hover:bg-primary/95 cursor-pointer text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRunningTest ? 'Simulating...' : 'Run Simulation'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

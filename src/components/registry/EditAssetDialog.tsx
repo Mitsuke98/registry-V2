@@ -52,7 +52,7 @@ export const EditAssetDialog: React.FC<EditAssetDialogProps> = ({
 
   const selectableWorkspaces = React.useMemo(() => {
     if (!currentUser) return [];
-    const teams = workspaces.filter(w => w.kind === 'team');
+    const teams = workspaces.filter(w => w.kind === 'shared');
     if (currentUser.role === 'super_admin') {
       return teams;
     }

@@ -1,60 +1,64 @@
 import React from 'react';
-import { Asterisk, User, Shield } from 'lucide-react';
+import { Shield, User as UserIcon } from 'lucide-react';
 import { useRegistry } from '@/data/RegistryContext';
+import type { User } from '@/data/types';
 
 export const SsoLogin: React.FC = () => {
-  const { setCurrentUser } = useRegistry();
+  const { setCurrentUser, usersList } = useRegistry();
 
-  const handleSignIn = (name: string, initials: string, role: 'end_user' | 'super_admin') => {
-    setCurrentUser({ name, initials, role });
+  const handleSignIn = (user: User) => {
+    setCurrentUser(user);
   };
 
-  const users: { name: string; initials: string; role: 'end_user' | 'super_admin'; roleLabel: string }[] = [
-    { name: 'Alex Vance', initials: 'AV', role: 'end_user', roleLabel: 'End User' },
-    { name: 'Jordan Blake', initials: 'JB', role: 'super_admin', roleLabel: 'Super Admin' }
-  ];
+  // Only list active users
+  const activeUsers = usersList.filter(u => u.active);
 
   return (
-    <div className="min-h-screen w-screen flex items-center justify-center bg-radial from-muted/50 to-background p-4 select-none">
-      <div className="w-full max-w-[420px] space-y-6">
+    <div className="min-h-screen w-screen flex items-center justify-center bg-gray-50 p-4 select-none">
+      <div className="w-full max-w-[400px] space-y-6">
+        
         {/* Logo and Header */}
-        <div className="flex flex-col items-center space-y-2 text-center">
-          <div className="size-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shadow-lg shadow-primary/20 animate-pulse">
-            <Asterisk className="size-8 stroke-[2.5]" />
+        <div className="flex flex-col items-center space-y-2 text-center select-none">
+          <div className="w-12 h-12 rounded bg-primary text-primary-foreground flex items-center justify-center font-black text-xl shadow-sm">
+            AN
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-foreground mt-4">Registry</h1>
-          <p className="text-sm text-muted-foreground font-medium">Sign in with Single Sign-On (SSO)</p>
+          <h1 className="text-xl font-bold tracking-tight text-gray-800 mt-3">Agent Nexus</h1>
+          <p className="text-xs text-gray-500 font-medium">Sign in with Single Sign-On (SSO)</p>
         </div>
 
         {/* Identity Card Container */}
-        <div className="bg-card border border-border rounded-2xl shadow-xl p-6 space-y-4">
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
-            Select an Identity
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-5 space-y-4">
+          <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider text-center select-none">
+            Select User Identity
           </div>
-          <div className="space-y-3">
-            {users.map((user) => (
+          
+          <div className="space-y-2">
+            {activeUsers.map((user) => (
               <button
-                key={user.name}
-                onClick={() => handleSignIn(user.name, user.initials, user.role)}
-                className="w-full text-left flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/30 hover:bg-primary/5 hover:border-primary cursor-pointer group transition-all duration-300 transform hover:-translate-y-0.5 active:translate-y-0"
+                key={user.id}
+                onClick={() => handleSignIn(user)}
+                className="w-full text-left flex items-center gap-3.5 p-3 rounded border border-gray-200 bg-white hover:bg-gray-50 hover:border-gray-300 cursor-pointer group transition-all"
               >
-                <div className="size-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm tracking-wider transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                <div className="w-10 h-10 rounded-full bg-gray-150 text-gray-700 flex items-center justify-center font-bold text-xs select-none group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0">
                   {user.initials}
                 </div>
+                
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-foreground truncate group-hover:text-primary">
+                  <div className="text-xs font-bold text-gray-800 truncate group-hover:text-primary transition-colors">
                     {user.name}
                   </div>
+                  <div className="text-[10px] text-gray-400 truncate mt-0.5 font-mono-custom">{user.email}</div>
+                  
                   <div className="flex items-center gap-1.5 mt-1">
                     {user.role === 'super_admin' ? (
-                      <span className="flex items-center gap-1 text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20">
-                        <Shield className="size-3" />
-                        {user.roleLabel}
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 rounded-full">
+                        <Shield className="w-2.5 h-2.5" />
+                        Super Admin
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1 text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20">
-                        <User className="size-3" />
-                        {user.roleLabel}
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-1.5 rounded-full">
+                        <UserIcon className="w-2.5 h-2.5" />
+                        End User
                       </span>
                     )}
                   </div>
@@ -64,9 +68,9 @@ export const SsoLogin: React.FC = () => {
           </div>
         </div>
 
-        {/* Muted SSO footnote */}
-        <div className="text-center text-[11px] text-muted-foreground/80 px-4 leading-relaxed">
-          This is a simulated authentication portal for demo purposes. Switching personas allows testing role-specific features.
+        {/* Footnote */}
+        <div className="text-center text-[10px] text-gray-400 px-4 leading-relaxed">
+          Deactivated users are hidden from this portal. Authenticated sessions are kept in-memory; a hard refresh signs out.
         </div>
       </div>
     </div>

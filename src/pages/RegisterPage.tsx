@@ -1,36 +1,33 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRegistry } from '@/data/RegistryContext';
-import { usePageSearch } from '@/context/SearchContext';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { 
+  ChangelogEditor 
+} from '@/components/registry/Kit';
+import { 
+  FileText, ChevronRight, Check, AlertTriangle, 
+  AlertCircle, Sparkles, Server, Bot, Loader, Upload
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { FEATURES } from '@/config/features';
-import {
-  CheckCircle2, AlertCircle, AlertTriangle, Info,
-  Upload, Terminal, Bot, Scroll, FileText, ChevronRight, Check, Loader2, Bold, Italic, List, ListOrdered, Quote, Code, Link as LinkIcon
-} from 'lucide-react';
 
 export const RegisterPage: React.FC = () => {
-  usePageSearch('Register assets...');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { registerItem, currentUser, workspaces } = useRegistry();
 
   const kind = searchParams.get('kind') as 'server' | 'agent' | 'prompt' | 'skill' | null;
 
-  // Global wizard state
+  // Wizard state
   const [currentStep, setCurrentStep] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  // Initial visibility states
-  const [initialGlobal, setInitialGlobal] = useState(false);
+  // Visibility states
+  const [initialGlobal, setInitialGlobal] = useState(true);
   const [initialWorkspaceIds, setInitialWorkspaceIds] = useState<string[]>([]);
 
   // ----------------------------------------------------
-  // Form values (MCP / Agent / Prompt / Skill)
+  // Form Values State
   // ----------------------------------------------------
   // Basic info (Shared)
   const [name, setName] = useState('');
@@ -48,9 +45,28 @@ export const RegisterPage: React.FC = () => {
 
   // Technical configuration (Shared)
   const [endpoint, setEndpoint] = useState('');
-  const [authType, setAuthType] = useState('None');
+  const [authType, setAuthType] = useState('none');
+  const [apiKeyHeaderName, setApiKeyHeaderName] = useState('X-API-Key');
+  const [apiKeyFormat, setApiKeyFormat] = useState('');
+  const [oauthAuthUrl, setOauthAuthUrl] = useState('');
+  const [oauthTokenUrl, setOauthTokenUrl] = useState('');
+  const [oauthScopes, setOauthScopes] = useState('');
+  const [bearerTokenEndpoint, setBearerTokenEndpoint] = useState('');
+  const [bearerRefreshTokenUrl, setBearerRefreshTokenUrl] = useState('');
+
+  const handleAuthTypeChange = (val: string) => {
+    setAuthType(val);
+    setApiKeyHeaderName('X-API-Key');
+    setApiKeyFormat('');
+    setOauthAuthUrl('');
+    setOauthTokenUrl('');
+    setOauthScopes('');
+    setBearerTokenEndpoint('');
+    setBearerRefreshTokenUrl('');
+    toast.info('Authentication fields cleared on auth type change.');
+  };
   const [transport, setTransport] = useState<'stdio' | 'sse' | 'http'>('stdio');
-  const [protocolVersion, setProtocolVersion] = useState('1.1.0');
+  const [protocolVersion, setProtocolVersion] = useState('1.0.0');
   const [docUrl, setDocUrl] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
 
@@ -64,8 +80,8 @@ export const RegisterPage: React.FC = () => {
   const [agentReasoning, setAgentReasoning] = useState(true);
   const [agentMemory, setAgentMemory] = useState(true);
   const [agentCollaboration, setAgentCollaboration] = useState(false);
-  const [agentStreaming, setAgentStreaming] = useState(true);
-  const [agentMultimodal, setAgentMultimodal] = useState(false);
+  const agentStreaming = true;
+  const agentMultimodal = false;
   const [agentLogging, setAgentLogging] = useState(true);
 
   // Prompt details
@@ -75,170 +91,208 @@ export const RegisterPage: React.FC = () => {
 
   // Skill fields
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [changelogHtml, setChangelogHtml] = useState('');
+  const [changelogHtml, setChangelogHtml] = useState('<p>Initial release description.</p>');
   const [skillMetadata, setSkillMetadata] = useState<{
     name: string;
     version: string;
     tags: string[];
     roles: string[];
-    network: string;
+    network: boolean;
   } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // Pipeline simulation state
   const [pipelineStepIndex, setPipelineStepIndex] = useState(-1);
-  const [pipelineStatus, setPipelineStatus] = useState<'running' | 'paused' | 'success' | 'failed'>('running');
+  const [pipelineStatus, setPipelineStatus] = useState<'idle' | 'running' | 'success' | 'failed'>('idle');
+  const [pipelineLogs, setPipelineLogs] = useState<string[]>([]);
 
-  const editorRef = useRef<HTMLDivElement>(null);
-
-  // Prefill publisher name when currentUser changes
   useEffect(() => {
     if (currentUser) {
       setPubName(currentUser.name);
+      setPubEmail(currentUser.email);
     }
   }, [currentUser]);
 
-  // Reset steps when kind changes
+  // Reset step on kind changes
   useEffect(() => {
     setCurrentStep(0);
     setIsSuccess(false);
-    setInitialGlobal(false);
-    setInitialWorkspaceIds([]);
+    setPipelineStatus('idle');
+    setPipelineLogs([]);
+    setPipelineStepIndex(-1);
+    setUploadedFile(null);
+    setSkillMetadata(null);
   }, [kind]);
 
-  // Sync toolbar active state for contentEditable changelog editor
-  const [editorActiveStates, setEditorActiveStates] = useState({
-    bold: false,
-    italic: false,
-  });
-
-  const checkEditorState = () => {
-    setEditorActiveStates({
-      bold: document.queryCommandState('bold'),
-      italic: document.queryCommandState('italic'),
-    });
-  };
-
-  const handleCommand = (command: string, value: string = '') => {
-    document.execCommand(command, false, value);
-    if (editorRef.current) {
-      setChangelogHtml(editorRef.current.innerHTML);
-    }
-    checkEditorState();
-  };
-
   // ----------------------------------------------------
-  // File Uploader validations (Skill)
+  // Skill File Upload validator
   // ----------------------------------------------------
-  const handleFileUpload = (file: File) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     setUploadError(null);
-    const validExtensions = ['.md', '.zip'];
-    const extension = '.' + file.name.split('.').pop()?.toLowerCase();
-    
-    if (!validExtensions.includes(extension)) {
-      setUploadError('Invalid file type. Only .md or .zip files are allowed.');
+
+    if (file.name.toLowerCase() !== 'skill.md') {
+      setUploadError('File must be named SKILL.md');
       return;
     }
-    
+
     if (file.size > 5 * 1024 * 1024) {
-      setUploadError('File size exceeds the 5 MB limit.');
+      setUploadError('File size exceeds the 5MB security scanned threshold.');
       return;
     }
 
-    setUploadedFile(file);
-    // Mock parsing file metadata
-    const parsedName = file.name.replace(/\.[^/.]+$/, "").split('-v')[0].replace(/[-_]/g, ' ');
-    const formattedName = parsedName.charAt(0).toUpperCase() + parsedName.slice(1);
-    
-    let parsedVersion = '1.0.0';
-    const versionMatch = file.name.match(/-v(\d+\.\d+\.\d+)/);
-    if (versionMatch) {
-      parsedVersion = versionMatch[1];
-    }
+    const canonicalFile = new File([file], 'SKILL.md', { type: file.type });
+    setUploadedFile(canonicalFile);
 
+    // Derived metadata
     setSkillMetadata({
-      name: formattedName,
-      version: parsedVersion,
-      tags: ['imported', extension.replace('.', '')],
-      roles: ['developer', 'integrator'],
-      network: 'Declared: No declared network access'
+      name: 'Imported Skill',
+      version: '1.0.0',
+      tags: ['imported', 'md'],
+      roles: ['developer'],
+      network: false
     });
   };
 
   // ----------------------------------------------------
-  // Steppers validation gates
+  // Prompt Linter Scanner
   // ----------------------------------------------------
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  
-  const validateStep = (): boolean | string => {
-    if (kind === 'server') {
+  const runPromptLint = () => {
+    const checks: { label: string; status: 'pass' | 'warn' | 'fail'; detail: string }[] = [];
+
+    // 1. Required fields
+    if (name.trim() && promptContent.trim()) {
+      checks.push({ label: 'Basic Fields check', status: 'pass', detail: 'Title and content payload are configured.' });
+    } else {
+      checks.push({ label: 'Basic Fields check', status: 'fail', detail: 'Title or content templates are missing.' });
+    }
+
+    // 2. Source length
+    if (promptSource.length <= 255) {
+      checks.push({ label: 'Source character threshold', status: 'pass', detail: `Under limit limit (${promptSource.length}/255).` });
+    } else {
+      checks.push({ label: 'Source character threshold', status: 'fail', detail: `Length exceeds 255 limit (${promptSource.length}/255).` });
+    }
+
+    // 3. Output format keyword warning
+    const formatKeys = /(format|json|xml|markdown|csv|output as|output format)/i;
+    if (formatKeys.test(promptContent)) {
+      checks.push({ label: 'Format instructions match', status: 'pass', detail: 'Explicit formatting instructions captured.' });
+    } else {
+      checks.push({ label: 'Format instructions match', status: 'warn', detail: 'No explicit formatting instructions defined.' });
+    }
+
+    // 4. Refusal guardrails warning
+    const guardrailKeys = /(instead|if not|fail|error|refuse|sorry|unable to|invalid)/i;
+    if (guardrailKeys.test(promptContent)) {
+      checks.push({ label: 'Autonomous failure guardrails', status: 'pass', detail: 'Validation refusal keywords detected.' });
+    } else {
+      checks.push({ label: 'Autonomous failure guardrails', status: 'warn', detail: 'No failure mitigation paths or refusal blocks defined.' });
+    }
+
+    // 5. Hardcoded API secrets scan (CRITICAL FAIL)
+    const secretKeys = /(sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|api[_-]?key|Bearer\s+eyJ)/i;
+    if (secretKeys.test(promptContent)) {
+      checks.push({ label: 'Credentials & API leak scan', status: 'fail', detail: 'Hardcoded API secrets or bearer tokens caught.' });
+    } else {
+      checks.push({ label: 'Credentials & API leak scan', status: 'pass', detail: 'Zero hardcoded developer keys detected.' });
+    }
+
+    // 6. PII validation
+    const piiKeys = /(\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b|\b\d{3}-\d{2}-\d{4}\b)/i;
+    if (piiKeys.test(promptContent)) {
+      checks.push({ label: 'PII pattern matches', status: 'warn', detail: 'Potential phone/email addresses matches caught.' });
+    } else {
+      checks.push({ label: 'PII pattern matches', status: 'pass', detail: 'No PII contact signatures found.' });
+    }
+
+    return checks;
+  };
+
+  const lintResults = runPromptLint();
+  const lintFailed = lintResults.some(r => r.status === 'fail');
+
+  // ----------------------------------------------------
+  // Skill Validation Pipeline Terminal simulation
+  // ----------------------------------------------------
+  const pipelineStages = [
+    'YAML safe-load: Parsing frontmatter parameters...',
+    'Metadata parsed: Validating keys, unknown fields, and reserved names...',
+    'Static vulnerability scanner: Searching for subprocess executions, exec, eval...',
+    'Trust clearance analyzer: Scoring risk checks...',
+    'Embeddings compilation: Indexing semantic vectors database maps...',
+    'Hash check: Generating deterministic SHA-256 signature...',
+    'Storage publish: Pushing files payload to bucket...'
+  ];
+
+  const startPipelineScan = () => {
+    setPipelineStatus('running');
+    setPipelineStepIndex(0);
+    setPipelineLogs(['[INIT] Beginning static analysis validation pipeline check...']);
+
+    let current = 0;
+    const interval = setInterval(() => {
+      if (current < pipelineStages.length) {
+        setPipelineLogs(prev => [...prev, `[RUNNING] ${pipelineStages[current]}`]);
+        setPipelineStepIndex(current);
+        
+        // Simulating duplicate check failure on specific input file name
+        if (current === 5 && uploadedFile?.name.includes('prompt-injection-filter-v1.2.0.md')) {
+          setPipelineLogs(prev => [
+            ...prev,
+            '[CRITICAL] Duplicate code hash detected! SHA-256 matches an existing skill.',
+            '[FAILED] Pipeline aborted.'
+          ]);
+          setPipelineStatus('failed');
+          clearInterval(interval);
+          return;
+        }
+
+        current++;
+      } else {
+        setPipelineLogs(prev => [...prev, '[SUCCESS] All rules passed. Sandbox level verified.', '[DONE] Pipeline completed.']);
+        setPipelineStatus('success');
+        clearInterval(interval);
+      }
+    }, 600);
+  };
+
+  // ----------------------------------------------------
+  // Steps navigation & Validation Gates
+  // ----------------------------------------------------
+  const handleContinue = () => {
+    // Validate current step fields
+    if (kind === 'server' || kind === 'agent') {
       if (currentStep === 0) {
-        if (!name.trim()) return 'Name is required.';
-        if (!version.trim()) return 'Version is required.';
-        if (!license.trim()) return 'License is required.';
+        if (!name.trim()) return toast.error('Name is required.');
+        if (!version.trim()) return toast.error('Version is required.');
       }
       if (currentStep === 1) {
-        if (!pubName.trim()) return 'Publisher name is required.';
-        if (!pubEmail.trim()) return 'Publisher email is required.';
-        if (!emailRegex.test(pubEmail)) return 'Please enter a valid publisher email.';
-        if (supportEmail && !emailRegex.test(supportEmail)) return 'Please enter a valid support email.';
+        if (!pubEmail.trim()) return toast.error('Publisher email contact is required.');
       }
       if (currentStep === 2) {
-        if (!endpoint.trim()) return 'Endpoint URL is required.';
-        if (!protocolVersion.trim()) return 'Protocol version is required.';
-      }
-    } else if (kind === 'agent') {
-      if (currentStep === 0) {
-        if (!name.trim()) return 'Name is required.';
-        if (!version.trim()) return 'Version is required.';
-        if (!license.trim()) return 'License is required.';
-      }
-      if (currentStep === 1) {
-        if (!pubName.trim()) return 'Publisher name is required.';
-        if (!pubEmail.trim()) return 'Publisher email is required.';
-        if (!emailRegex.test(pubEmail)) return 'Please enter a valid publisher email.';
-        if (supportEmail && !emailRegex.test(supportEmail)) return 'Please enter a valid support email.';
-      }
-      if (currentStep === 2) {
-        if (!endpoint.trim()) return 'Endpoint URL is required.';
-        if (!protocolVersion.trim()) return 'Protocol version is required.';
+        if (!endpoint.trim()) return toast.error('Endpoint URL command is required.');
       }
     } else if (kind === 'prompt') {
       if (currentStep === 0) {
-        if (!name.trim()) return 'Title is required.';
-        if (!promptContent.trim()) return 'Prompt contents are required.';
-        if (promptSource.length > 255) return 'Source length exceeds the 255 character limit.';
+        if (!name.trim()) return toast.error('Name is required.');
+        if (!promptContent.trim()) return toast.error('Prompt content template is required.');
       }
-      if (currentStep === 1) {
-        // Step 2 is Lint check: fails block Continue
-        const lint = runPromptLint();
-        if (lint.some(l => l.status === 'fail')) {
-          return 'Fails in security checks must be resolved before submitting.';
-        }
+      if (currentStep === 1 && lintFailed) {
+        return toast.error('Resolve critical credentials leak before submitting.');
       }
     } else if (kind === 'skill') {
-      if (currentStep === 0) {
-        if (!uploadedFile) return 'Please upload a SKILL.md or .zip bundle first.';
+      if (currentStep === 0 && !uploadedFile) {
+        return toast.error('Please upload a SKILL.md or ZIP file.');
       }
-      if (currentStep === 1) {
-        if (pipelineStatus !== 'success') {
-          return 'Pipeline scan must pass successfully before continuing.';
-        }
+      if (currentStep === 1 && pipelineStatus !== 'success') {
+        return toast.error('Wait or retry scanner pipeline checks.');
       }
     }
-    return true;
-  };
 
-  const handleContinue = () => {
-    const val = validateStep();
-    if (typeof val === 'string') {
-      toast.error(val);
-      return;
-    }
-    
-    // Custom flow navigation
     if (kind === 'skill' && currentStep === 0) {
       setCurrentStep(1);
-      // Run automatic pipeline scanning
       startPipelineScan();
     } else {
       setCurrentStep(prev => prev + 1);
@@ -246,136 +300,93 @@ export const RegisterPage: React.FC = () => {
   };
 
   // ----------------------------------------------------
-  // Prompt lint checks
+  // Final Registration Submit Execution
   // ----------------------------------------------------
-  const runPromptLint = () => {
-    const checks: { label: string; status: 'pass' | 'warn' | 'fail'; detail: string }[] = [];
+  const handleSubmitRegistration = () => {
+    const idSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(100 + Math.random() * 900);
     
-    // 1. Required fields
-    if (name.trim() && promptContent.trim()) {
-      checks.push({ label: 'Required fields present', status: 'pass', detail: 'Title and content fields contain data.' });
-    } else {
-      checks.push({ label: 'Required fields present', status: 'fail', detail: 'Title or content details are missing.' });
-    }
-
-    // 2. Source length
-    if (promptSource.length <= 255) {
-      checks.push({ label: 'Source length threshold', status: 'pass', detail: `Under limit limit (${promptSource.length}/255).` });
-    } else {
-      checks.push({ label: 'Source length threshold', status: 'fail', detail: `Length exceeds 255 limit (${promptSource.length}/255).` });
-    }
-
-    // 3. Output format specified
-    const formatRegex = /(format|json|xml|markdown|csv|output as|output format)/i;
-    if (formatRegex.test(promptContent)) {
-      checks.push({ label: 'Output format instruction', status: 'pass', detail: 'Specific output format/schema instructions detected.' });
-    } else {
-      checks.push({ label: 'Output format instruction', status: 'warn', detail: 'No explicit output formatting rules specified (JSON/Markdown etc).' });
-    }
-
-    // 4. Refusal path / guardrail
-    const guardrailRegex = /(instead|if not|fail|error|refuse|sorry|unable to|invalid)/i;
-    if (guardrailRegex.test(promptContent)) {
-      checks.push({ label: 'Refusal path guardrails', status: 'pass', detail: 'Safety fallback logic or error state handles detected.' });
-    } else {
-      checks.push({ label: 'Refusal path guardrails', status: 'warn', detail: 'No fallback refusal handling or guardrail logic defined.' });
-    }
-
-    // 5. Secrets detection
-    const secretsRegex = /(sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|api[_-]?key|Bearer\s+eyJ)/i;
-    if (secretsRegex.test(promptContent)) {
-      checks.push({ label: 'Secrets scanning', status: 'fail', detail: 'Potential api credentials, AWS keys or Bearer tokens detected.' });
-    } else {
-      checks.push({ label: 'Secrets scanning', status: 'pass', detail: 'No api keys or cloud access tokens detected.' });
-    }
-
-    // 6. PII check
-    const piiRegex = /(\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b|\b\d{3}-\d{2}-\d{4}\b|\b\+?\d{1,3}?[-.\s]?(?:\d{1,4}?[-.\s]?){1,4}\d{1,4}\b)/i;
-    if (piiRegex.test(promptContent)) {
-      checks.push({ label: 'PII scanner', status: 'warn', detail: 'Email formats or phone patterns detected in prompt contents.' });
-    } else {
-      checks.push({ label: 'PII scanner', status: 'pass', detail: 'No emails, phone numbers or social ID formats found.' });
-    }
-
-    return checks;
-  };
-
-  // ----------------------------------------------------
-  // Skill pipeline simulation (Step 2)
-  // ----------------------------------------------------
-  const pipelineStages = [
-    { label: 'Frontmatter parsed', detail: 'YAML safe-load: name, version, tags present' },
-    { label: 'ZIP contents enumerated', detail: 'All extensions allowed · no binaries · no path traversal' },
-    { label: 'Security scan (8 rules)', detail: 'exec calls · shell/cmd files · file writes · undeclared network · env access · obfuscation · credential patterns · excessive size' },
-    { label: 'Risk score computed', detail: '0.18 — below flag threshold 0.70 = clean' },
-    { label: 'Embeddings generated', detail: 'BAAI/bge-small-en-v1.5 · 384 dimensions' },
-    { label: 'Content hash computed', detail: 'SHA-256 · deterministic' },
-    { label: 'Files uploaded to S3', detail: 'skills/{slug}/{version}/ objects' },
-    { label: 'Indexed and searchable', detail: 'In-memory NumPy index updated' }
-  ];
-
-  const startPipelineScan = () => {
-    setPipelineStatus('running');
-    setPipelineStepIndex(-1);
-
-    const isDuplicate = uploadedFile?.name.includes('prompt-injection-filter-v1.2.0.md');
-
-    let current = 0;
-    const interval = setInterval(() => {
-      setPipelineStepIndex(current);
-      if (current === 5 && isDuplicate) {
-        // Halt at duplicate hash detection
-        setPipelineStatus('failed');
-        clearInterval(interval);
-        return;
-      }
-
-      if (current === pipelineStages.length - 1) {
-        setPipelineStatus('success');
-        clearInterval(interval);
-      } else {
-        current++;
-      }
-    }, 500);
-  };
-
-  // ----------------------------------------------------
-  // Final Registration Submit Handler
-  // ----------------------------------------------------
-  const handleSubmit = () => {
-    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(Math.random() * 1000);
-    
-    let itemDetails: any = {
-      id,
-      name: kind === 'prompt' ? name : (kind === 'skill' ? (skillMetadata?.name || name) : name),
+    let baseAsset: any = {
+      id: idSlug,
+      name: kind === 'skill' ? (skillMetadata?.name || name) : name,
       version: kind === 'skill' ? (skillMetadata?.version || version) : version,
-      description: kind === 'skill' ? 'Custom uploaded skill' : description,
+      description: kind === 'skill' ? 'Uploaded runtime action skill' : description,
       status: 'pending',
+      ownerName: currentUser?.name || 'Unknown Owner',
+      license,
+      registeredAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      weeklyCalls: [0, 0, 0, 0],
+      weeklyErrors: [0, 0, 0, 0],
+      trust: {
+        verified: false,
+        score: kind === 'skill' ? 95 : 85,
+        scannedAt: new Date().toISOString(),
+        audits: []
+      },
+      visibility: {
+        global: initialGlobal,
+        workspaceIds: initialWorkspaceIds
+      }
     };
 
     if (kind === 'server') {
-      itemDetails = {
-        ...itemDetails,
+      baseAsset = {
+        ...baseAsset,
         transport,
         endpoint,
-        tools: mcpTools ? [{ name: 'mcp_tool', description: 'Automatically generated capability.', params: {} }] : [],
-        resources: mcpResources ? [{ name: 'mcp_resource', uri: 'custom://resource' }] : [],
-        prompts: mcpPrompts ? [{ name: 'mcp_prompt', description: 'mcp template', args: [] }] : [],
+        publisher: {
+          name: pubName,
+          email: pubEmail,
+          org,
+          website,
+          supportEmail,
+          supportUrl
+        },
+        tech: {
+          endpoint,
+          gatewayUrl: `https://api.modelcontextprotocol.io/v1/sse/${idSlug}`,
+          authType,
+          transport,
+          protocolVersion,
+          docsUrl: docUrl,
+          sourceUrl,
+          apiKeyHeaderName,
+          apiKeyFormat,
+          authorizationUrl: oauthAuthUrl,
+          tokenUrl: oauthTokenUrl,
+          scopes: oauthScopes,
+          tokenEndpoint: bearerTokenEndpoint,
+          refreshUrl: bearerRefreshTokenUrl
+        },
+        tools: mcpTools ? [{ name: 'query_database', description: 'Query sandbox catalog schemas.', paramCount: 2 }] : [],
+        resources: mcpResources ? [{ name: 'server_logs', uriPattern: 'logs://stdout', mimeType: 'text/plain' }] : [],
+        prompts: mcpPrompts ? [{ name: 'setup_instructions', description: 'Install template block', argCount: 0 }] : [],
         capabilities: { tools: mcpTools, resources: mcpResources, prompts: mcpPrompts },
-        tags: ['custom', 'mcp'],
-        trust: {
-          verified: false,
-          score: 85,
-          scannedAt: new Date().toISOString(),
-          audits: [{ check: 'Manual registration', status: 'pass', detail: 'Initial static registration.' }]
-        }
+        auditRecords: [],
+        healthChecks: []
       };
     } else if (kind === 'agent') {
-      itemDetails = {
-        ...itemDetails,
-        endpoint,
-        capabilities: {
-          autonomyLevel,
+      baseAsset = {
+        ...baseAsset,
+        autonomy: autonomyLevel,
+        publisher: {
+          name: pubName,
+          email: pubEmail
+        },
+        tech: {
+          endpoint,
+          authType,
+          protocolVersion,
+          apiKeyHeaderName,
+          apiKeyFormat,
+          authorizationUrl: oauthAuthUrl,
+          tokenUrl: oauthTokenUrl,
+          scopes: oauthScopes,
+          tokenEndpoint: bearerTokenEndpoint,
+          refreshUrl: bearerRefreshTokenUrl
+        },
+        skillRefs: [],
+        capabilityToggles: {
           reasoning: agentReasoning,
           memory: agentMemory,
           collaboration: agentCollaboration,
@@ -383,92 +394,77 @@ export const RegisterPage: React.FC = () => {
           multimodal: agentMultimodal,
           logging: agentLogging
         },
-        tags: ['custom', 'agent'],
-        trust: {
-          verified: false,
-          score: 80,
-          scannedAt: new Date().toISOString(),
-          audits: [{ check: 'Manual registration', status: 'pass', detail: 'Initial agent config validation.' }]
-        }
-      };
-    } else if (kind === 'prompt') {
-      itemDetails = {
-        ...itemDetails,
-        source: promptSource,
-        content: promptContent,
-        tags: promptTags.split(',').map(t => t.trim()).filter(Boolean),
-        argCount: 0,
-        trust: {
-          verified: false,
-          score: 90,
-          scannedAt: new Date().toISOString(),
-          audits: runPromptLint()
-        }
+        auditRecords: [],
+        healthChecks: []
       };
     } else if (kind === 'skill') {
-      itemDetails = {
-        ...itemDetails,
-        name: skillMetadata?.name || 'Custom Skill',
-        version: skillMetadata?.version || '1.0.0',
+      baseAsset = {
+        ...baseAsset,
+        category: 'Scanned Import',
         changelog: changelogHtml,
-        category: 'Imported',
-        tags: skillMetadata?.tags || ['imported'],
-        trust: {
-          verified: false,
-          score: 92,
-          scannedAt: new Date().toISOString(),
-          audits: [
-            { check: 'Duplicate Check', status: 'pass', detail: 'No duplicates found' },
-            { check: 'Static analysis check', status: 'pass', detail: 'Code structure valid' }
-          ]
-        }
+        stars: 0,
+        downloads: 0,
+        hashSignature: 'SHA-256: 4f18db0d38b5ef194a2b97c413b1f5e2777174e2d31f0b0938b',
+        runtime: {
+          requirements: ['mcp-sdk>=1.0.0'],
+          sandbox: { network: skillMetadata?.network || false }
+        },
+        files: [
+          { path: 'SKILL.md', size: '1.2KB', content: `# Skill: ${skillMetadata?.name}\n\nThis is a scanned autocompiled skill layout.` }
+        ],
+        comments: [],
+        auditLogs: []
+      };
+    } else if (kind === 'prompt') {
+      baseAsset = {
+        ...baseAsset,
+        source: promptSource,
+        rawPrompt: promptContent,
+        args: promptTags.split(',').map(t => ({ name: t.trim(), required: true, description: `Variable placeholder ${t}` })).filter(a => a.name !== ''),
+        comments: [],
+        auditLogs: []
       };
     }
 
-    const finalDetails = {
-      ...itemDetails,
-      visibility: {
-        global: initialGlobal,
-        workspaceIds: initialWorkspaceIds
-      }
-    };
-
-    registerItem(kind!, finalDetails);
+    registerItem(kind!, baseAsset);
     setIsSuccess(true);
-    toast.success('Submitted for approval — a super admin will review it');
+    toast.success('Registration request submitted successfully.');
   };
 
-  const renderInitialVisibilityBlock = () => {
+  // ----------------------------------------------------
+  // Initial Visibility Block UI Helper
+  // ----------------------------------------------------
+  const renderVisibilitySection = () => {
     if (!currentUser) return null;
-    const userTeams = workspaces.filter(w => w.kind === 'team' && w.members.includes(currentUser.name));
+    const sharedWorkspaces = workspaces.filter(w => w.members.includes(currentUser.name));
 
     return (
-      <div className="p-4 border border-border rounded-xl space-y-3 bg-muted/5">
-        <div className="border-b border-border/40 pb-1.5 mb-2">
-          <span className="font-bold text-foreground">Initial Visibility Settings</span>
-          <span className="text-[10px] text-muted-foreground block mt-0.5">Configure initial visibility to apply immediately when approved.</span>
+      <div className="bg-gray-50 border border-gray-200 rounded-md p-4 space-y-4">
+        <div>
+          <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider font-mono">Initial Visibility share</h4>
+          <p className="text-[11px] text-gray-400 mt-0.5">Control where this asset will list automatically once approved.</p>
         </div>
 
-        <div className="flex items-center justify-between p-2.5 rounded-lg border bg-background">
-          <div className="flex flex-col select-none">
-            <span className="text-[11px] font-semibold text-foreground">Global Catalog Listing</span>
-            <span className="text-[10px] text-muted-foreground">List this asset globally in the catalog.</span>
+        <div className="flex items-center justify-between bg-white border border-gray-200 p-3 rounded-md">
+          <div className="flex flex-col">
+            <span className="text-xs font-bold text-gray-700">Public Global Listing</span>
+            <span className="text-[10px] text-gray-400">Available to all directory users once approved</span>
           </div>
-          <input
-            type="checkbox"
-            checked={initialGlobal}
+          <input 
+            type="checkbox" 
+            checked={initialGlobal} 
             onChange={e => setInitialGlobal(e.target.checked)}
-            className="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+            className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
           />
         </div>
 
-        {userTeams.length > 0 && (
+        {sharedWorkspaces.length > 0 && (
           <div className="space-y-1.5">
-            <label className="text-[11px] text-muted-foreground font-semibold select-none">Share to Workspace(s)</label>
-            <div className="max-h-28 overflow-y-auto border border-border rounded-lg p-2 space-y-1 bg-background">
-              {userTeams.map(ws => (
-                <label key={ws.id} className="flex items-center gap-2 text-xs text-foreground cursor-pointer hover:bg-accent/40 p-0.5 rounded">
-                  <input
+            <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider select-none">Share to Workspaces</span>
+            <div className="max-h-28 overflow-y-auto border border-gray-200 bg-white rounded-md p-2 space-y-1">
+              {sharedWorkspaces.map(ws => (
+                <label key={ws.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer text-xs">
+                  <input 
                     type="checkbox"
                     checked={initialWorkspaceIds.includes(ws.id)}
                     onChange={e => {
@@ -478,11 +474,9 @@ export const RegisterPage: React.FC = () => {
                         setInitialWorkspaceIds(initialWorkspaceIds.filter(id => id !== ws.id));
                       }
                     }}
-                    className="size-3.5 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                    className="rounded border-gray-300 text-primary focus:ring-primary"
                   />
-                  <div className="flex flex-col select-none">
-                    <span className="font-semibold text-[11px] leading-tight">{ws.name}</span>
-                  </div>
+                  <span className="font-semibold text-gray-700">{ws.name}</span>
                 </label>
               ))}
             </div>
@@ -493,25 +487,31 @@ export const RegisterPage: React.FC = () => {
   };
 
   // ----------------------------------------------------
-  // Render Step Steppers configuration
+  // Steppers navigation indicator header
   // ----------------------------------------------------
-  const renderSteppersHeader = (stepsCount: number) => {
+  const renderSteppersHeader = (total: number) => {
     return (
-      <div className="flex items-center gap-2 border-b border-border pb-4 mb-6 select-none">
-        {Array.from({ length: stepsCount }).map((_, idx) => {
+      <div className="flex items-center gap-2 select-none border-b border-gray-200 pb-4 mb-6 overflow-x-auto">
+        {Array.from({ length: total }).map((_, idx) => {
           const isActive = idx === currentStep;
-          const isCompleted = idx < currentStep;
+          const isDone = idx < currentStep;
           return (
             <React.Fragment key={idx}>
-              {idx > 0 && <ChevronRight className="size-4 text-muted-foreground/30" />}
-              <div className="flex items-center gap-1.5 text-xs font-semibold">
-                <span className={`size-5 rounded-full flex items-center justify-center font-mono text-[10px] ${
-                  isCompleted ? 'bg-emerald-500 text-white' : isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground border border-border'
+              {idx > 0 && <ChevronRight className="w-3.5 h-3.5 text-gray-300 shrink-0" />}
+              <div className="flex items-center gap-1.5 text-xs font-semibold shrink-0">
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center font-mono text-[10px] ${
+                  isDone 
+                    ? 'bg-emerald-500 text-white' 
+                    : isActive 
+                      ? 'bg-primary text-primary-foreground' 
+                      : 'bg-gray-100 text-gray-400 border'
                 }`}>
-                  {isCompleted ? <Check className="size-3" /> : idx + 1}
+                  {isDone ? <Check className="w-3 h-3" /> : idx + 1}
                 </span>
-                <span className={isActive ? 'text-foreground' : 'text-muted-foreground'}>
-                  {getStepTitle(idx)}
+                <span className={isActive ? 'text-gray-800' : 'text-gray-400'}>
+                  {kind === 'server' || kind === 'agent'
+                    ? ['Basic info', 'Publisher details', 'Technical configs', 'Capabilities', 'Review submit'][idx]
+                    : ['Asset payload', 'Scanner scans', 'Review submit'][idx]}
                 </span>
               </div>
             </React.Fragment>
@@ -521,107 +521,44 @@ export const RegisterPage: React.FC = () => {
     );
   };
 
-  const getStepTitle = (idx: number): string => {
-    if (kind === 'server' || kind === 'agent') {
-      const titles = ['Basic Info', 'Publisher Details', 'Technical Config', 'Capabilities', 'Review & Submit'];
-      return titles[idx] || '';
-    }
-    if (kind === 'prompt') {
-      return ['Details', 'Pre-publish Review', 'Review & Submit'][idx] || '';
-    }
-    if (kind === 'skill') {
-      return ['Upload', 'Validate & Scan', 'Review & Submit'][idx] || '';
-    }
-    return '';
-  };
-
   // ----------------------------------------------------
-  // Success Screen
-  // ----------------------------------------------------
-  if (isSuccess) {
-    const personalWsId = currentUser?.role === 'super_admin' ? 'jordans-workspace' : 'alexs-workspace';
-    return (
-      <div className="max-w-xl mx-auto space-y-6 pt-12 select-none">
-        <Card className="p-8 bg-card border-border rounded-2xl shadow-xl text-center space-y-6">
-          <div className="size-16 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
-            <CheckCircle2 className="size-10" />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold text-foreground">Registration Submitted</h2>
-            <p className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
-              Submitted for approval — a super admin will review it. You can check the approval status in your workspace.
-            </p>
-          </div>
-          <div className="flex items-center justify-center gap-4 pt-2">
-            <button
-              onClick={() => navigate(`/workspaces/${personalWsId}`)}
-              className="h-10 px-5 rounded-lg border border-border bg-background hover:bg-accent/60 text-xs font-semibold cursor-pointer"
-            >
-              View workspace
-            </button>
-            <button
-              onClick={() => {
-                setName('');
-                setVersion('1.0.0');
-                setDescription('');
-                setEndpoint('');
-                setUploadedFile(null);
-                setSkillMetadata(null);
-                setChangelogHtml('');
-                setSearchParams({});
-              }}
-              className="bg-primary text-primary-foreground hover:bg-primary/95 text-xs font-semibold px-5 h-10 rounded-lg transition-colors cursor-pointer"
-            >
-              Register another
-            </button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // ----------------------------------------------------
-  // No kind preset: LIGHTWEIGHT KIND PICKER
+  // Kind Selection Grid (Landing)
   // ----------------------------------------------------
   if (!kind) {
-    const assetOptions = [
-      { id: 'server', label: 'MCP Server', desc: 'Standard Model Context Protocol context gateway (stdio/sse/http)', icon: Terminal, active: true },
-      { id: 'agent', label: 'A2A Agent', desc: 'Autonomous execution agent with custom gateway endpoints', icon: Bot, active: true },
-      { id: 'prompt', label: 'Prompt Template', desc: 'Reusable argument templates prompt block text', icon: Scroll, active: FEATURES.prompts },
-      { id: 'skill', label: 'Skill (Instruction)', desc: 'Governed LLM system prompts instruction sets', icon: FileText, active: true }
+    const assets = [
+      { id: 'server', name: 'MCP Server', desc: 'Context gateway connector supporting standard protocol routes', icon: Server, enabled: true },
+      { id: 'agent', name: 'A2A Agent', desc: 'Autonomous execution agent with custom webhook endpoints', icon: Bot, enabled: true },
+      { id: 'skill', name: 'Skill (Instruction)', desc: 'Governed LLM system prompts instruction sets', icon: FileText, enabled: true },
+      { id: 'prompt', name: 'Prompt Template', desc: 'Reusable argument templates prompt block text', icon: Sparkles, enabled: FEATURES.prompts }
     ];
 
     return (
-      <div className="max-w-2xl mx-auto space-y-6">
-        <div className="text-center select-none mb-6">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Register Asset</h1>
-          <p className="text-[13px] text-muted-foreground mt-1">
-            Choose the type of asset you want to register in the registry directory.
-          </p>
+      <div className="max-w-2xl mx-auto space-y-6 select-none pt-8">
+        <div className="text-center">
+          <h1 className="text-xl font-bold text-gray-800">Register Registry Asset</h1>
+          <p className="text-xs text-gray-500 mt-1">Select the asset class you want to submit for governance approval.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {assetOptions.map((opt) => {
-            const Icon = opt.icon;
+        <div className="grid grid-cols-2 gap-4">
+          {assets.map(a => {
+            const Icon = a.icon;
             return (
               <button
-                key={opt.id}
-                disabled={!opt.active}
-                onClick={() => setSearchParams({ kind: opt.id })}
-                className={`p-6 text-left border rounded-2xl bg-card hover:bg-primary/5 hover:border-primary cursor-pointer select-none transition-all duration-300 transform hover:-translate-y-0.5 group ${
-                  !opt.active ? 'opacity-40 cursor-not-allowed border-dashed border-border' : 'border-border'
+                key={a.id}
+                disabled={!a.enabled}
+                onClick={() => setSearchParams({ kind: a.id })}
+                className={`p-5 text-left border bg-white rounded-md hover:border-primary hover:bg-gray-50 cursor-pointer select-none transition-all group ${
+                  a.enabled ? 'border-gray-200' : 'opacity-40 cursor-not-allowed border-dashed'
                 }`}
               >
-                <div className="size-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-4 transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                  <Icon className="size-5" />
+                <div className="w-10 h-10 rounded bg-gray-100 text-gray-500 flex items-center justify-center mb-3 group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0">
+                  <Icon className="w-5 h-5" />
                 </div>
-                <div className="font-bold text-foreground text-[14px] flex items-center gap-1.5">
-                  {opt.label}
-                  {!opt.active && (
-                    <span className="text-[9px] bg-muted border border-border text-muted-foreground px-1.5 py-0.5 rounded-md font-mono select-none">Disabled</span>
-                  )}
-                </div>
-                <div className="text-[11.5px] leading-relaxed text-muted-foreground mt-2">{opt.desc}</div>
+                <h3 className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                  {a.name}
+                  {!a.enabled && <span className="text-[9px] font-mono border px-1 rounded bg-gray-50 text-gray-400">Gated</span>}
+                </h3>
+                <p className="text-[11px] text-gray-400 mt-1 leading-relaxed">{a.desc}</p>
               </button>
             );
           })}
@@ -631,201 +568,308 @@ export const RegisterPage: React.FC = () => {
   }
 
   // ----------------------------------------------------
-  // FLOWS: RENDERING
+  // Success state render
   // ----------------------------------------------------
-  return (
-    <div className="max-w-4xl mx-auto space-y-6 select-text">
-      {/* Stepper progress indicator */}
-      {renderSteppersHeader(kind === 'server' || kind === 'agent' ? 5 : 3)}
+  if (isSuccess) {
+    return (
+      <div className="max-w-md mx-auto text-center py-12 space-y-4 select-none">
+        <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center mx-auto shrink-0">
+          <Check className="w-6 h-6" />
+        </div>
+        <h2 className="text-sm font-bold text-gray-800">Registration Submitted</h2>
+        <p className="text-xs text-gray-500 leading-relaxed">
+          Your asset has been successfully submitted to the approvals pipeline queue. A platform administrator has been notified.
+        </p>
+        <div className="flex gap-2.5 justify-center pt-2">
+          <button 
+            onClick={() => navigate('/catalog')}
+            className="px-3.5 py-1.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
+          >
+            Back to Catalog
+          </button>
+          <button 
+            onClick={() => setSearchParams({})}
+            className="px-3.5 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer focus:outline-none"
+          >
+            Register Another
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-      {/* stepper forms */}
-      <Card className="p-8 bg-card border-border rounded-xl shadow-none">
+  const stepsCount = kind === 'server' || kind === 'agent' ? 5 : 3;
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      {renderSteppersHeader(stepsCount)}
+
+      <div className="bg-white border border-gray-200 rounded-md p-6">
+        
         {/* ==================================================== */}
-        {/* MCP & AGENT COMMON STEPS */}
+        {/* SERVERS & AGENTS STEP MULTIPLEX */}
         {/* ==================================================== */}
         {(kind === 'server' || kind === 'agent') && (
           <>
             {currentStep === 0 && (
-              <div className="space-y-4 text-xs font-semibold">
-                <h3 className="text-sm font-bold text-foreground mb-4">Basic Information</h3>
+              <div className="space-y-4 text-xs">
+                <h3 className="text-sm font-bold text-gray-800 pb-2 border-b">Basic Metadata</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Name *</label>
-                    <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Brave Search MCP" className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Asset Name *</label>
+                    <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Postgres Connection Gateway" className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary" />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Version *</label>
-                    <Input value={version} onChange={e => setVersion(e.target.value)} className="h-9 text-xs font-mono" />
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Initial Version *</label>
+                    <input type="text" value={version} onChange={e => setVersion(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary font-mono-custom" />
                   </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-foreground">Description</label>
-                  <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Enter details about this asset..." className="min-h-[100px] text-xs" />
+                <div className="space-y-1">
+                  <label className="font-semibold text-gray-700">Description</label>
+                  <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="Explain how client LLMs should utilize this integration..." className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary" />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-foreground">License *</label>
-                  <Select value={license} onValueChange={val => val && setLicense(val)}>
-                    <SelectTrigger className="h-9 text-xs bg-background">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-popover border-border">
-                      {['MIT', 'Apache-2.0', 'GPL-3.0', 'BSD-3-Clause', 'Proprietary'].map(lic => (
-                        <SelectItem key={lic} value={lic} className="text-xs cursor-pointer">{lic}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-1">
+                  <label className="font-semibold text-gray-700">License Policy *</label>
+                  <select value={license} onChange={e => setLicense(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded bg-white font-semibold text-gray-700 cursor-pointer focus:outline-none">
+                    <option value="MIT">MIT License</option>
+                    <option value="Apache-2.0">Apache 2.0</option>
+                    <option value="Proprietary">Proprietary Closed-Source</option>
+                  </select>
                 </div>
               </div>
             )}
 
             {currentStep === 1 && (
               <div className="space-y-4 text-xs font-semibold">
-                <h3 className="text-sm font-bold text-foreground mb-4">Publisher Details</h3>
+                <h3 className="text-sm font-bold text-gray-800 pb-2 border-b">Publisher contact info</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Publisher Name *</label>
-                    <Input value={pubName} disabled onChange={e => setPubName(e.target.value)} className="h-9 text-xs bg-muted" />
+                  <div className="space-y-1">
+                    <label className="text-gray-750">Publisher Name *</label>
+                    <input type="text" value={pubName} disabled className="w-full px-2.5 py-1.5 border border-gray-200 rounded bg-gray-50 text-gray-400 font-bold" />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Publisher Email *</label>
-                    <Input value={pubEmail} onChange={e => setPubEmail(e.target.value)} placeholder="e.g. contact@domain.com" className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="text-gray-750">Publisher Email *</label>
+                    <input type="email" value={pubEmail} onChange={e => setPubEmail(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Organization (Optional)</label>
-                    <Input value={org} onChange={e => setOrg(e.target.value)} className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="text-gray-755">Organization</label>
+                    <input type="text" value={org} onChange={e => setOrg(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none" />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Website (Optional)</label>
-                    <Input value={website} onChange={e => setWebsite(e.target.value)} className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="text-gray-755">Website</label>
+                    <input type="text" value={website} onChange={e => setWebsite(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-255 rounded focus:outline-none" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Support Email (Optional)</label>
-                    <Input value={supportEmail} onChange={e => setSupportEmail(e.target.value)} className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="text-gray-755">Support Email</label>
+                    <input type="text" value={supportEmail} onChange={e => setSupportEmail(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none" />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Support URL (Optional)</label>
-                    <Input value={supportUrl} onChange={e => setSupportUrl(e.target.value)} className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="text-gray-755">Support URL</label>
+                    <input type="text" value={supportUrl} onChange={e => setSupportUrl(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none" />
                   </div>
                 </div>
               </div>
             )}
 
             {currentStep === 2 && (
-              <div className="space-y-4 text-xs font-semibold">
-                <h3 className="text-sm font-bold text-foreground mb-4">Technical Configuration</h3>
-                <div className="space-y-1.5">
-                  <label className="text-foreground">Endpoint URL *</label>
-                  <Input value={endpoint} onChange={e => setEndpoint(e.target.value)} placeholder="e.g. npx -y @modelcontextprotocol/server" className="h-9 text-xs font-mono" />
+              <div className="space-y-4 text-xs">
+                <h3 className="text-sm font-bold text-gray-800 pb-2 border-b">Technical Configuration</h3>
+                <div className="space-y-1">
+                  <label className="font-semibold text-gray-700">Endpoint Connection string / command *</label>
+                  <input type="text" value={endpoint} onChange={e => setEndpoint(e.target.value)} placeholder="e.g. npx -y @modelcontextprotocol/server-postgres" className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary font-mono-custom" />
                 </div>
+                
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Authentication Type *</label>
-                    <Select value={authType} onValueChange={val => val && setAuthType(val)}>
-                      <SelectTrigger className="h-9 text-xs bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-popover border-border">
-                        {['None', 'API key', 'OAuth 2.0', 'Bearer token'].map(a => (
-                          <SelectItem key={a} value={a} className="text-xs cursor-pointer">{a}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Auth posture type</label>
+                    <select value={authType} onChange={e => handleAuthTypeChange(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded bg-white text-gray-700 cursor-pointer focus:outline-none">
+                      <option value="none">No authentication</option>
+                      <option value="api-key">API key</option>
+                      <option value="oauth2">OAuth 2.0</option>
+                      <option value="bearer">Bearer token</option>
+                    </select>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Transport Type *</label>
-                    <Select value={transport as any} onValueChange={(val: any) => setTransport(val)}>
-                      <SelectTrigger className="h-9 text-xs bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-popover border-border">
-                        {['stdio', 'sse', 'http'].map(t => (
-                          <SelectItem key={t} value={t} className="text-xs cursor-pointer">{t}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Transport type</label>
+                    <select value={transport} onChange={e => setTransport(e.target.value as any)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded bg-white text-gray-700 cursor-pointer focus:outline-none">
+                      <option value="stdio">stdio pipe</option>
+                      <option value="sse">sse endpoint</option>
+                      <option value="http">http jsonrpc</option>
+                    </select>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Protocol Version *</label>
-                    <Input value={protocolVersion} onChange={e => setProtocolVersion(e.target.value)} className="h-9 text-xs font-mono" />
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Protocol version</label>
+                    <input type="text" value={protocolVersion} onChange={e => setProtocolVersion(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none font-mono-custom" />
                   </div>
                 </div>
+
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Documentation URL (Optional)</label>
-                    <Input value={docUrl} onChange={e => setDocUrl(e.target.value)} className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Documentation link</label>
+                    <input type="text" value={docUrl} onChange={e => setDocUrl(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none" />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-foreground">Source Code URL (Optional)</label>
-                    <Input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Source repository URL</label>
+                    <input type="text" value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none" />
                   </div>
+                </div>
+
+                {/* Conditional Auth Fields */}
+                <div className="mt-4 border-t border-gray-100 pt-4 space-y-3">
+                  {authType === 'none' && (
+                    <p className="text-[11px] text-gray-400 italic">No authentication configured.</p>
+                  )}
+                  
+                  {authType === 'api-key' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="font-semibold text-gray-700">API key header name</label>
+                        <input 
+                          type="text" 
+                          value={apiKeyHeaderName} 
+                          onChange={e => setApiKeyHeaderName(e.target.value)} 
+                          className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none font-mono-custom" 
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-semibold text-gray-700">Key format (optional regex)</label>
+                        <input 
+                          type="text" 
+                          value={apiKeyFormat} 
+                          onChange={e => setApiKeyFormat(e.target.value)} 
+                          placeholder="e.g. ^[A-Za-z0-9]{32}$" 
+                          className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none font-mono-custom" 
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {authType === 'oauth2' && (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="font-semibold text-gray-700">Authorization URL *</label>
+                          <input 
+                            type="text" 
+                            value={oauthAuthUrl} 
+                            onChange={e => setOauthAuthUrl(e.target.value)} 
+                            placeholder="https://example.com/oauth/authorize" 
+                            className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none font-mono-custom" 
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-semibold text-gray-700">Token URL *</label>
+                          <input 
+                            type="text" 
+                            value={oauthTokenUrl} 
+                            onChange={e => setOauthTokenUrl(e.target.value)} 
+                            placeholder="https://example.com/oauth/token" 
+                            className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none font-mono-custom" 
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-semibold text-gray-700">Scopes (comma-separated)</label>
+                        <input 
+                          type="text" 
+                          value={oauthScopes} 
+                          onChange={e => setOauthScopes(e.target.value)} 
+                          placeholder="read, write, admin" 
+                          className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none" 
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {authType === 'bearer' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="font-semibold text-gray-700">Token endpoint *</label>
+                        <input 
+                          type="text" 
+                          value={bearerTokenEndpoint} 
+                          onChange={e => setBearerTokenEndpoint(e.target.value)} 
+                          placeholder="https://example.com/api/token" 
+                          className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none font-mono-custom" 
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-semibold text-gray-700">Refresh URL (optional)</label>
+                        <input 
+                          type="text" 
+                          value={bearerRefreshTokenUrl} 
+                          onChange={e => setBearerRefreshTokenUrl(e.target.value)} 
+                          placeholder="https://example.com/api/refresh" 
+                          className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none font-mono-custom" 
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {authType !== 'none' && (
+                    <span className="block text-[10px] text-gray-400 mt-1 italic">Fields cleared on auth type change</span>
+                  )}
                 </div>
               </div>
             )}
 
             {currentStep === 3 && (
-              <div className="space-y-6 text-xs font-semibold">
+              <div className="space-y-6 text-xs select-none">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">Capabilities & Features</h3>
-                  <span className="text-[11px] text-muted-foreground mt-1 block">Capabilities can only be set during registration.</span>
+                  <h3 className="text-sm font-bold text-gray-800">Capabilities Toggles</h3>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Capabilities are fixed at registration. These are read-only thereafter.</p>
                 </div>
 
                 {kind === 'server' ? (
-                  <div className="space-y-4 pt-2">
-                    <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-muted/20">
-                      <div>
-                        <div className="text-xs font-bold text-foreground">Expose Tools</div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">Allows the server to declare client-executable tool schemas</div>
+                  <div className="space-y-3">
+                    <label className="flex items-center justify-between p-3 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-gray-700 block">Expose Tools Capability</span>
+                        <span className="text-[10px] text-gray-450">Exposes custom tool parameters models to clients</span>
                       </div>
-                      <input type="checkbox" checked={mcpTools} onChange={e => setMcpTools(e.target.checked)} className="size-4 cursor-pointer" />
-                    </div>
-                    <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-muted/20">
-                      <div>
-                        <div className="text-xs font-bold text-foreground">Expose Resources</div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">Allows clients to read contextual server file streams or tables</div>
+                      <input type="checkbox" checked={mcpTools} onChange={e => setMcpTools(e.target.checked)} className="rounded text-primary cursor-pointer size-4" />
+                    </label>
+                    <label className="flex items-center justify-between p-3 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-gray-700 block">Expose Resources Capability</span>
+                        <span className="text-[10px] text-gray-455">Permits reading raw text document stream models</span>
                       </div>
-                      <input type="checkbox" checked={mcpResources} onChange={e => setMcpResources(e.target.checked)} className="size-4 cursor-pointer" />
-                    </div>
-                    <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-muted/20">
-                      <div>
-                        <div className="text-xs font-bold text-foreground">Expose Prompts</div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">Provides predefined system template workflows to LLM contexts</div>
+                      <input type="checkbox" checked={mcpResources} onChange={e => setMcpResources(e.target.checked)} className="rounded text-primary cursor-pointer size-4" />
+                    </label>
+                    <label className="flex items-center justify-between p-3 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-gray-700 block">Expose Prompts Template Capability</span>
+                        <span className="text-[10px] text-gray-455">Preloads system workflow prompts</span>
                       </div>
-                      <input type="checkbox" checked={mcpPrompts} onChange={e => setMcpPrompts(e.target.checked)} className="size-4 cursor-pointer" />
-                    </div>
+                      <input type="checkbox" checked={mcpPrompts} onChange={e => setMcpPrompts(e.target.checked)} className="rounded text-primary cursor-pointer size-4" />
+                    </label>
                   </div>
                 ) : (
-                  <div className="space-y-4 pt-2">
-                    <div className="space-y-1.5">
-                      <label className="text-foreground">Autonomy Level *</label>
-                      <Select value={autonomyLevel} onValueChange={val => setAutonomyLevel(val as any)}>
-                        <SelectTrigger className="h-9 text-xs bg-background border-border">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-popover border-border">
-                          {['Low', 'Mid', 'High'].map(lv => (
-                            <SelectItem key={lv} value={lv} className="text-xs cursor-pointer">{lv} Autonomy</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="font-semibold text-gray-700">Autonomy tier</label>
+                      <select value={autonomyLevel} onChange={e => setAutonomyLevel(e.target.value as any)} className="w-full px-2.5 py-1.5 border border-gray-250 rounded bg-white text-gray-700 font-semibold cursor-pointer">
+                        <option value="Low">Low (Requires approvals on all tool execution actions)</option>
+                        <option value="Mid">Mid (Requires approvals only on state-mutating actions)</option>
+                        <option value="High">High (Autonomous agent loop without human in the loop)</option>
+                      </select>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 pt-2">
+                    <div className="grid grid-cols-2 gap-4">
                       {[
-                        { id: 'reasoning', label: 'Reasoning Capability', state: agentReasoning, set: setAgentReasoning },
-                        { id: 'memory', label: 'Long-term Memory Access', state: agentMemory, set: setAgentMemory },
-                        { id: 'collaboration', label: 'Multi-Agent Collaboration', state: agentCollaboration, set: setAgentCollaboration },
-                        { id: 'streaming', label: 'Real-time Output Streaming', state: agentStreaming, set: setAgentStreaming },
-                        { id: 'multimodal', label: 'Multimodal Input Parsing', state: agentMultimodal, set: setAgentMultimodal },
-                        { id: 'logging', label: 'Auditable Execution Logging', state: agentLogging, set: setAgentLogging }
-                      ].map(cap => (
-                        <div key={cap.id} className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-muted/20">
-                          <span className="text-[11px] font-bold text-foreground">{cap.label}</span>
-                          <input type="checkbox" checked={cap.state} onChange={e => cap.set(e.target.checked)} className="size-4 cursor-pointer" />
-                        </div>
+                        { label: 'Reasoning capabilities', state: agentReasoning, set: setAgentReasoning },
+                        { label: 'Short-term execution memory', state: agentMemory, set: setAgentMemory },
+                        { label: 'Cross-agent collaboration', state: agentCollaboration, set: setAgentCollaboration },
+                        { label: 'Autosave audit logs', state: agentLogging, set: setAgentLogging }
+                      ].map((toggle, idx) => (
+                        <label key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded hover:bg-gray-55 cursor-pointer">
+                          <span className="font-bold text-gray-700">{toggle.label}</span>
+                          <input type="checkbox" checked={toggle.state} onChange={e => toggle.set(e.target.checked)} className="rounded text-primary cursor-pointer size-4" />
+                        </label>
                       ))}
                     </div>
                   </div>
@@ -834,444 +878,211 @@ export const RegisterPage: React.FC = () => {
             )}
 
             {currentStep === 4 && (
-              <div className="space-y-6 text-xs select-none">
+              <div className="space-y-6">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">Review & Submit</h3>
-                  <span className="text-[11px] text-muted-foreground mt-1 block">A super admin will review this registration before it publishes.</span>
+                  <h3 className="text-sm font-bold text-gray-800">Review & Submit Registration</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Confirm details and specify workspaces access limits before publishing.</p>
                 </div>
 
-                <div className="space-y-4">
-                  {/* Group 1: Basic Info */}
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">1. Basic Info</span>
-                      <button onClick={() => setCurrentStep(0)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    <div>Name: <span className="font-semibold text-foreground">{name}</span></div>
-                    <div>Version: <span className="font-mono text-foreground">{version}</span></div>
-                    <div>License: <span className="font-semibold text-foreground">{license}</span></div>
+                <div className="border border-gray-150 rounded bg-gray-50 p-4 space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Class:</span>
+                    <span className="font-bold text-gray-700 uppercase">{kind}</span>
                   </div>
-
-                  {/* Group 2: Publisher */}
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">2. Publisher details</span>
-                      <button onClick={() => setCurrentStep(1)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    <div>Publisher: <span className="font-semibold text-foreground">{pubName}</span> ({pubEmail})</div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Name:</span>
+                    <span className="font-bold text-gray-700">{name}</span>
                   </div>
-
-                  {/* Group 3: Config */}
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">3. Technical config</span>
-                      <button onClick={() => setCurrentStep(2)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    <div>Endpoint URL: <span className="font-mono text-foreground">{endpoint}</span></div>
-                    <div>Auth Type: <span className="font-semibold text-foreground">{authType}</span></div>
-                    <div>Transport: <span className="font-semibold text-foreground">{transport}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Endpoint:</span>
+                    <span className="font-mono text-gray-600 truncate max-w-sm">{endpoint}</span>
                   </div>
-
-                  {/* Group 4: Capabilities */}
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">4. Capabilities</span>
-                      <button onClick={() => setCurrentStep(3)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    {kind === 'server' ? (
-                      <div className="flex gap-4">
-                        <div>Tools: <span className="font-semibold text-foreground">{mcpTools ? 'Yes' : 'No'}</span></div>
-                        <div>Resources: <span className="font-semibold text-foreground">{mcpResources ? 'Yes' : 'No'}</span></div>
-                        <div>Prompts: <span className="font-semibold text-foreground">{mcpPrompts ? 'Yes' : 'No'}</span></div>
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        <div>Autonomy: <span className="font-bold text-primary">{autonomyLevel}</span></div>
-                        <div className="flex flex-wrap gap-2 pt-1">
-                          {agentReasoning && <span className="bg-muted px-2 py-0.5 rounded text-[10px] text-foreground">Reasoning</span>}
-                          {agentMemory && <span className="bg-muted px-2 py-0.5 rounded text-[10px] text-foreground">Memory</span>}
-                          {agentCollaboration && <span className="bg-muted px-2 py-0.5 rounded text-[10px] text-foreground">Collaboration</span>}
-                          {agentStreaming && <span className="bg-muted px-2 py-0.5 rounded text-[10px] text-foreground">Streaming</span>}
-                          {agentMultimodal && <span className="bg-muted px-2 py-0.5 rounded text-[10px] text-foreground">Multimodal</span>}
-                          {agentLogging && <span className="bg-muted px-2 py-0.5 rounded text-[10px] text-foreground">Logging</span>}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  {renderInitialVisibilityBlock()}
                 </div>
 
-                <div className="p-3 bg-amber-500/5 text-amber-600 dark:text-amber-400 border border-amber-500/10 rounded-lg text-[11px] leading-relaxed flex items-start gap-2 select-none">
-                  <Info className="size-4 shrink-0 mt-0.5" />
-                  <span>Submitted for approval — a super admin will review it. Live publishing is restricted.</span>
-                </div>
+                {renderVisibilitySection()}
               </div>
             )}
           </>
         )}
 
         {/* ==================================================== */}
-        {/* PROMPT FLOW */}
+        {/* PROMPTS STEP MULTIPLEX */}
         {/* ==================================================== */}
         {kind === 'prompt' && (
           <>
             {currentStep === 0 && (
-              <div className="space-y-4 text-xs font-semibold">
-                <h3 className="text-sm font-bold text-foreground mb-4">Prompt Template Details</h3>
-                <div className="space-y-1.5">
-                  <label className="text-foreground">Title *</label>
-                  <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. SQL Query Generator" className="h-9 text-xs" />
-                </div>
-                <div className="space-y-1.5 relative">
-                  <div className="flex items-center justify-between">
-                    <label className="text-foreground">Source URL / Origin</label>
-                    <span className={`text-[10px] font-mono ${promptSource.length > 255 ? 'text-red-500 font-bold' : 'text-muted-foreground'}`}>{promptSource.length}/255</span>
+              <div className="space-y-4 text-xs">
+                <h3 className="text-sm font-bold text-gray-800 pb-2 border-b">Template Details</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Template Title *</label>
+                    <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Code Review Prompt" className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary" />
                   </div>
-                  <Input value={promptSource} onChange={e => setPromptSource(e.target.value)} placeholder="e.g. github.com/my-prompts/sql-query" className="h-9 text-xs" />
+                  <div className="space-y-1">
+                    <label className="font-semibold text-gray-700">Source url/attribution (Max 255 chars)</label>
+                    <input type="text" value={promptSource} onChange={e => setPromptSource(e.target.value)} placeholder="e.g. github.com/prompts/library" className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary" />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-foreground">Description</label>
-                  <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Overview of the prompt logic and expected outputs..." className="min-h-[80px] text-xs" />
+                <div className="space-y-1">
+                  <label className="font-semibold text-gray-700">Template instruction text *</label>
+                  <textarea value={promptContent} onChange={e => setPromptContent(e.target.value)} rows={6} placeholder="Write the LLM prompt block template. Use {{variables}} notation for inputs..." className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none focus:ring-1 focus:ring-primary font-mono-custom" />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-foreground">Prompt Contents (System instruction block) *</label>
-                  <Textarea value={promptContent} onChange={e => setPromptContent(e.target.value)} placeholder="You are an expert SQL engineer..." className="min-h-[240px] text-xs font-mono" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-foreground">Tags (comma-separated)</label>
-                  <Input value={promptTags} onChange={e => setPromptTags(e.target.value)} placeholder="sql, generation, developer" className="h-9 text-xs" />
+                <div className="space-y-1">
+                  <label className="font-semibold text-gray-700">Variables declared (comma separated)</label>
+                  <input type="text" value={promptTags} onChange={e => setPromptTags(e.target.value)} placeholder="e.g. language, code_snippet" className="w-full px-2.5 py-1.5 border border-gray-250 rounded focus:outline-none" />
                 </div>
               </div>
             )}
 
             {currentStep === 1 && (
-              <div className="space-y-6 text-xs font-semibold select-none">
+              <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">Pre-publish Review Check</h3>
-                  <span className="text-[11px] text-muted-foreground mt-1 block">Validating instruction blocks for secrets, formatting errors, or PII formats.</span>
+                  <h3 className="text-sm font-bold text-gray-800">Pre-publish static security checks</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Prompt contents are parsed for credentials leak and safe formatting patterns.</p>
                 </div>
 
-                <div className="space-y-3">
-                  {runPromptLint().map((lint, idx) => {
-                    const isFail = lint.status === 'fail';
-                    const isWarn = lint.status === 'warn';
-                    const Icon = isFail ? AlertCircle : (isWarn ? AlertTriangle : CheckCircle2);
-                    const colorClass = isFail ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20' : (isWarn ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20');
-                    return (
-                      <div key={idx} className={`p-4 border rounded-xl flex items-start gap-3 ${colorClass}`}>
-                        <Icon className="size-4.5 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold">{lint.label}</div>
-                          <div className="text-[10px] mt-0.5 font-normal leading-relaxed opacity-90">{lint.detail}</div>
-                        </div>
+                <div className="border border-gray-200 bg-white rounded overflow-hidden divide-y divide-gray-150">
+                  {lintResults.map((check, idx) => (
+                    <div key={idx} className="p-3.5 flex items-start justify-between gap-4 text-xs select-none">
+                      <div className="min-w-0">
+                        <span className="font-bold text-gray-700 block">{check.label}</span>
+                        <span className="text-gray-400 mt-0.5 block">{check.detail}</span>
                       </div>
-                    );
-                  })}
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        check.status === 'pass' 
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                          : check.status === 'warn' 
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200' 
+                            : 'bg-red-50 text-red-700 border border-red-200'
+                      }`}>
+                        {check.status.toUpperCase()}
+                      </span>
+                    </div>
+                  ))}
                 </div>
+
+                {lintFailed && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded text-rose-700 text-xs font-semibold leading-relaxed flex gap-2">
+                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>Submission blocked: A critical secrets leak check failed. Remove credentials keywords or API keys before proceeding.</span>
+                  </div>
+                )}
               </div>
             )}
 
             {currentStep === 2 && (
-              <div className="space-y-6 text-xs select-none">
+              <div className="space-y-6">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">Review & Submit</h3>
-                  <span className="text-[11px] text-muted-foreground mt-1 block">Review your template before sending it to the super admin queue.</span>
+                  <h3 className="text-sm font-bold text-gray-800">Review & Submit</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Define share rules before submitting to the approval catalog pipeline.</p>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">1. Details</span>
-                      <button onClick={() => setCurrentStep(0)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    <div>Title: <span className="font-semibold text-foreground">{name}</span></div>
-                    <div>Source: <span className="font-mono text-foreground">{promptSource || 'N/A'}</span></div>
-                    <div className="pt-2">
-                      <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">Content Snippet</div>
-                      <pre className="p-3 bg-muted rounded border border-border/60 font-mono text-[10px] leading-normal whitespace-pre-wrap max-h-32 overflow-y-auto">{promptContent}</pre>
-                    </div>
-                  </div>
-
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">2. Safety checks result</span>
-                      <button onClick={() => setCurrentStep(1)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
-                      <CheckCircle2 className="size-4" />
-                      <span>Ready for queue submission</span>
-                    </div>
-                  </div>
-                  {renderInitialVisibilityBlock()}
-                </div>
+                {renderVisibilitySection()}
               </div>
             )}
           </>
         )}
 
         {/* ==================================================== */}
-        {/* SKILL FLOW */}
+        {/* SKILLS STEP MULTIPLEX */}
         {/* ==================================================== */}
         {kind === 'skill' && (
           <>
             {currentStep === 0 && (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground select-none">Upload Skill Instruct File</h3>
-                  <span className="text-[11px] text-muted-foreground mt-1 block select-none">
-                    Select or drag SKILL.md. Demo version already seeded: name file <code className="bg-muted px-1 rounded text-red-500 font-semibold">prompt-injection-filter-v1.2.0.md</code> to trigger duplicate warning.
-                  </span>
+                  <h3 className="text-sm font-bold text-gray-800">Upload SKILL.md file</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Upload a SKILL.md document containing your skill specifications and body rules.</p>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Dominant slot: Upload Card */}
-                  <div className="lg:col-span-2 space-y-4">
-                    <div
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={e => {
-                        e.preventDefault();
-                        if (e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
-                      }}
-                      className="p-8 border-2 border-dashed border-border hover:border-primary rounded-2xl text-center space-y-4 bg-muted/10 cursor-pointer select-none transition-colors"
-                      onClick={() => {
-                        const input = document.createElement('input');
-                        input.type = 'file';
-                        input.accept = '.md,.zip';
-                        input.onchange = e => {
-                          const file = (e.target as HTMLInputElement).files?.[0];
-                          if (file) handleFileUpload(file);
-                        };
-                        input.click();
-                      }}
-                    >
-                      <Upload className="size-10 text-muted-foreground/80 mx-auto" />
-                      <div className="space-y-1">
-                        <div className="text-xs font-bold text-foreground">Drag & drop file here or click to browse</div>
-                        <div className="text-[10px] text-muted-foreground">Accepts SKILL.md or .zip bundle up to 5 MB</div>
-                      </div>
-                    </div>
-
-                    {uploadError && (
-                      <div className="p-3 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-xl text-xs font-semibold flex items-center gap-2 select-none">
-                        <AlertCircle className="size-4" />
-                        <span>{uploadError}</span>
-                      </div>
-                    )}
-
-                    {uploadedFile && (
-                      <div className="p-4 border border-border rounded-xl space-y-4">
-                        <div className="flex items-center justify-between select-none">
-                          <div className="flex items-center gap-2">
-                            <FileText className="size-5 text-primary" />
-                            <div className="text-xs font-bold text-foreground">{uploadedFile.name}</div>
-                          </div>
-                          <button onClick={() => setUploadedFile(null)} className="text-red-500 hover:text-red-600 text-xs font-semibold cursor-pointer">Remove</button>
-                        </div>
-
-                        {/* Changelog custom toolbar editor */}
-                        <div className="space-y-2 select-text">
-                          <label className="text-xs font-bold text-foreground select-none">Changelog Notes *</label>
-                          <div className="border border-border rounded-lg overflow-hidden bg-background">
-                            {/* Editor Toolbar */}
-                            <div className="bg-muted/40 border-b border-border p-1.5 flex items-center gap-1 select-none">
-                              <button type="button" onClick={() => handleCommand('bold')} className={`p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer ${editorActiveStates.bold ? 'bg-primary/10 text-primary' : ''}`} title="Bold"><Bold className="size-3.5" /></button>
-                              <button type="button" onClick={() => handleCommand('italic')} className={`p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer ${editorActiveStates.italic ? 'bg-primary/10 text-primary' : ''}`} title="Italic"><Italic className="size-3.5" /></button>
-                              <div className="h-4 w-px bg-border/80 mx-1" />
-                              <button type="button" onClick={() => handleCommand('insertUnorderedList')} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer" title="Bullet List"><List className="size-3.5" /></button>
-                              <button type="button" onClick={() => handleCommand('insertOrderedList')} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer" title="Numbered List"><ListOrdered className="size-3.5" /></button>
-                              <button type="button" onClick={() => handleCommand('formatBlock', 'blockquote')} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer" title="Quote"><Quote className="size-3.5" /></button>
-                              <button type="button" onClick={() => handleCommand('formatBlock', 'pre')} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer" title="Code Block"><Code className="size-3.5" /></button>
-                              <div className="h-4 w-px bg-border/80 mx-1" />
-                              <button type="button" onClick={() => {
-                                const url = prompt('Enter link URL:');
-                                if (url) handleCommand('createLink', url);
-                              }} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer" title="Add Link"><LinkIcon className="size-3.5" /></button>
-                            </div>
-                            
-                            {/* contentEditable region */}
-                            <div
-                              ref={editorRef}
-                              contentEditable
-                              className="p-4 min-h-[160px] text-xs focus:outline-none leading-relaxed prose prose-sm max-w-none"
-                              onInput={e => setChangelogHtml((e.target as HTMLDivElement).innerHTML)}
-                              onKeyUp={checkEditorState}
-                              onMouseUp={checkEditorState}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sidebar supporting cards */}
-                  <div className="space-y-4 select-none">
-                    {/* Metadata card */}
-                    <div className="p-4 border border-border bg-muted/10 rounded-xl space-y-3">
-                      <div className="text-xs font-bold text-foreground">Detected Metadata</div>
-                      {skillMetadata ? (
-                        <div className="space-y-1.5 text-[11px]">
-                          <div>Name: <span className="font-semibold text-foreground">{skillMetadata.name}</span></div>
-                          <div>Version: <span className="font-mono text-foreground">{skillMetadata.version}</span></div>
-                          <div>Network: <span className="font-semibold text-foreground">{skillMetadata.network}</span></div>
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-muted-foreground leading-normal">
-                          Please upload a valid file to auto-parse name and details.
-                        </div>
-                      )}
-                    </div>
-
-                    {/* What we check card */}
-                    <div className="p-4 border border-border bg-muted/10 rounded-xl space-y-3">
-                      <div className="text-xs font-bold text-foreground">What we check</div>
-                      <ul className="space-y-1.5 text-[10.5px] text-muted-foreground list-disc list-inside">
-                        <li>YAML frontmatter parsing</li>
-                        <li>File size / archive validation</li>
-                        <li>MAGIC byte validation</li>
-                        <li>Vulnerability regex signature</li>
-                      </ul>
-                    </div>
-                  </div>
+                <div className="border-2 border-dashed border-gray-200 rounded-md p-8 text-center bg-gray-50 select-none relative">
+                  <input 
+                    type="file" 
+                    onChange={handleFileChange}
+                    accept=".md"
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                  <Upload className="w-8 h-8 text-gray-400 mx-auto mb-3" />
+                  <span className="text-xs font-bold text-gray-700 block">Click or Drag SKILL.md file here</span>
+                  <span className="text-[10px] text-gray-400 mt-1 block">Drop your SKILL.md file here or click to browse (max 5 MB)</span>
                 </div>
+
+                {uploadError && (
+                  <div className="p-2.5 bg-red-50 border border-red-200 rounded text-xs font-semibold text-rose-700 flex gap-2 select-none">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{uploadError}</span>
+                  </div>
+                )}
+
+                {uploadedFile && (
+                  <div className="p-3 bg-white border border-gray-200 rounded flex items-center justify-between text-xs select-none">
+                    <div>
+                      <span className="font-bold text-gray-700 block truncate max-w-sm">{uploadedFile.name}</span>
+                      <span className="text-gray-400 text-[10px]">{(uploadedFile.size/1024).toFixed(1)} KB · Scanned Type Verified</span>
+                    </div>
+                    <button onClick={() => setUploadedFile(null)} className="text-rose-600 font-bold cursor-pointer">Remove</button>
+                  </div>
+                )}
               </div>
             )}
 
             {currentStep === 1 && (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground select-none">Scanning & Verification Pipeline</h3>
-                  <span className="text-[11px] text-muted-foreground mt-1 block select-none">Running automatic governance scan validations.</span>
+                  <h3 className="text-sm font-bold text-gray-800">Scanners pipeline logs</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Simulated terminal execution scans the file code check rules.</p>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Dominant slot: Pipeline Progress */}
-                  <div className="lg:col-span-2 space-y-4">
-                    <div className="p-5 border border-border rounded-xl space-y-3 bg-muted/5">
-                      <div className="flex items-center justify-between pb-2 border-b border-border/40 select-none">
-                        <span className="text-xs font-bold text-foreground flex items-center gap-2">
-                          {pipelineStatus === 'running' && <Loader2 className="size-4 text-primary animate-spin" />}
-                          {pipelineStatus === 'success' && <Check className="size-4 text-emerald-500 font-bold" />}
-                          {pipelineStatus === 'failed' && <AlertCircle className="size-4 text-red-500" />}
-                          <span>Scan status: <span className="capitalize">{pipelineStatus}</span></span>
-                        </span>
-                        {pipelineStatus === 'failed' && (
-                          <button onClick={startPipelineScan} className="text-primary hover:underline text-xs font-semibold cursor-pointer">Retry</button>
-                        )}
+                {/* Pipeline terminal console */}
+                <div className="bg-gray-900 border border-gray-800 text-gray-100 font-mono text-[11px] p-4 rounded-md h-52 overflow-y-auto space-y-1.5 shadow-inner select-text">
+                  {pipelineLogs.map((log, lIdx) => {
+                    const isSuccess = log.includes('[SUCCESS]') || log.includes('[DONE]');
+                    const isFail = log.includes('[CRITICAL]') || log.includes('[FAILED]');
+                    return (
+                      <div key={lIdx} className={isSuccess ? 'text-emerald-400 font-semibold' : isFail ? 'text-rose-400 font-semibold' : 'text-gray-300'}>
+                        {log}
                       </div>
-
-                      {/* Pipeline step rows */}
-                      <div className="space-y-3">
-                        {pipelineStages.map((stage, idx) => {
-                          const isHalted = pipelineStatus === 'failed' && idx === 5;
-                          const isCurrent = idx === pipelineStepIndex && pipelineStatus === 'running';
-                          const isDone = idx < pipelineStepIndex || pipelineStatus === 'success';
-
-                          let icon = <span className="size-4 rounded-full border border-border bg-background block" />;
-                          let colorClass = 'text-muted-foreground';
-
-                          if (isHalted) {
-                            icon = <AlertTriangle className="size-4.5 text-amber-500" />;
-                            colorClass = 'text-amber-600 dark:text-amber-400 border border-amber-500/20 bg-amber-500/5 p-3 rounded-lg';
-                          } else if (isDone) {
-                            icon = <Check className="size-4 text-emerald-500 font-bold" />;
-                            colorClass = 'text-foreground';
-                          } else if (isCurrent) {
-                            icon = <Loader2 className="size-4 text-primary animate-spin" />;
-                            colorClass = 'text-foreground font-semibold';
-                          }
-
-                          return (
-                            <div key={idx} className={`flex items-start gap-3 p-2.5 transition-all ${colorClass}`}>
-                              <div className="shrink-0 mt-0.5">{icon}</div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-xs font-bold">{stage.label}</div>
-                                {isHalted ? (
-                                  <div className="text-[10px] mt-1 font-semibold leading-relaxed">
-                                    This exact version is already registered — bump the version and re-upload.
-                                  </div>
-                                ) : (
-                                  <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">{stage.detail}</div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                    );
+                  })}
+                  {pipelineStatus === 'running' && (
+                    <div className="flex items-center gap-1.5 text-gray-500">
+                      <Loader className="w-3.5 h-3.5 animate-spin" />
+                      <span>Scanner in progress... (Step {pipelineStepIndex + 1} of {pipelineStages.length})</span>
                     </div>
-                  </div>
-
-                  {/* Sidebar supporting cards (carried over) */}
-                  <div className="space-y-4 select-none">
-                    <div className="p-4 border border-border bg-muted/10 rounded-xl space-y-3">
-                      <div className="text-xs font-bold text-foreground">Detected Metadata</div>
-                      {skillMetadata && (
-                        <div className="space-y-1.5 text-[11px]">
-                          <div>Name: <span className="font-semibold text-foreground">{skillMetadata.name}</span></div>
-                          <div>Version: <span className="font-mono text-foreground">{skillMetadata.version}</span></div>
-                          <div>Network: <span className="font-semibold text-foreground">{skillMetadata.network}</span></div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-4 border border-border bg-muted/10 rounded-xl space-y-3">
-                      <div className="text-xs font-bold text-foreground">What we check</div>
-                      <ul className="space-y-1.5 text-[10.5px] text-muted-foreground list-disc list-inside">
-                        <li>YAML frontmatter parsing</li>
-                        <li>File size / archive validation</li>
-                        <li>MAGIC byte validation</li>
-                        <li>Vulnerability regex signature</li>
-                      </ul>
-                    </div>
-                  </div>
+                  )}
                 </div>
+
+                {pipelineStatus === 'failed' && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded text-rose-700 text-xs font-semibold leading-relaxed flex gap-2">
+                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>Simulation rule failed: Duplicate code hash detected. Submission is blocked for duplicate md files.</span>
+                  </div>
+                )}
               </div>
             )}
 
             {currentStep === 2 && (
-              <div className="space-y-6 text-xs select-none">
+              <div className="space-y-6">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">Review & Submit</h3>
-                  <span className="text-[11px] text-muted-foreground mt-1 block">Review your custom skill settings before submitting.</span>
+                  <h3 className="text-sm font-bold text-gray-800">Review & Submit</h3>
+                  <p className="text-xs text-gray-505 mt-0.5">Write release logs and configure share rules.</p>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">1. Metadata & Source</span>
-                      <button onClick={() => setCurrentStep(0)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    <div>Name: <span className="font-semibold text-foreground">{skillMetadata?.name}</span></div>
-                    <div>Version: <span className="font-mono text-foreground">{skillMetadata?.version}</span></div>
-                    <div>File name: <span className="font-semibold text-foreground">{uploadedFile?.name}</span></div>
-                    {changelogHtml && (
-                      <div className="pt-2">
-                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">Changelog</div>
-                        <div className="p-3 bg-muted rounded border border-border/60 text-[10.5px] leading-relaxed max-h-32 overflow-y-auto" dangerouslySetInnerHTML={{ __html: changelogHtml }} />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-4 border border-border rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-2">
-                      <span className="font-bold text-foreground">2. Scanning outcome</span>
-                      <button onClick={() => setCurrentStep(1)} className="text-primary hover:underline font-semibold cursor-pointer">Edit</button>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold mb-1">
-                      <CheckCircle2 className="size-4" />
-                      <span>8/8 stages passed successfully</span>
-                    </div>
-                    <div className="text-[10px] text-muted-foreground font-mono">Risk score: 0.18 · Hash: SHA-256 (Deterministic verified)</div>
-                  </div>
-                  {renderInitialVisibilityBlock()}
+                <div className="space-y-2">
+                  <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider font-mono">Version Changelog logs</span>
+                  <ChangelogEditor value={changelogHtml} onChange={setChangelogHtml} />
                 </div>
+
+                {renderVisibilitySection()}
               </div>
             )}
           </>
         )}
 
         {/* ==================================================== */}
-        {/* FOOTER CONTROLS */}
+        {/* FOOTER WIZARD CONTROLS */}
         {/* ==================================================== */}
-        <div className="border-t border-border/80 pt-6 mt-8 flex items-center justify-between select-none">
+        <div className="flex items-center justify-between border-t border-gray-200 pt-5 mt-6 select-none">
           <button
             onClick={() => {
               if (currentStep === 0) {
@@ -1280,26 +1091,29 @@ export const RegisterPage: React.FC = () => {
                 setCurrentStep(prev => prev - 1);
               }
             }}
-            className="h-9 px-4 rounded-lg border border-border bg-background hover:bg-accent/60 text-xs font-semibold cursor-pointer transition-colors"
+            className="px-3.5 py-1.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-705 hover:bg-gray-50 cursor-pointer focus:outline-none"
           >
-            Back
+            {currentStep === 0 ? 'Cancel' : 'Previous'}
           </button>
 
-          <button
-            onClick={() => {
-              const isLastStep = kind === 'server' || kind === 'agent' ? currentStep === 4 : currentStep === 2;
-              if (isLastStep) {
-                handleSubmit();
-              } else {
-                handleContinue();
-              }
-            }}
-            className="bg-primary text-primary-foreground hover:bg-primary/95 text-xs font-semibold px-5 h-9 rounded-lg transition-colors cursor-pointer"
-          >
-            {kind === 'server' || kind === 'agent' ? (currentStep === 4 ? 'Submit Registration' : 'Continue') : (currentStep === 2 ? 'Submit Registration' : 'Continue')}
-          </button>
+          {currentStep === stepsCount - 1 ? (
+            <button
+              onClick={handleSubmitRegistration}
+              className="px-4 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer focus:outline-none"
+            >
+              Submit Registration
+            </button>
+          ) : (
+            <button
+              onClick={handleContinue}
+              className="px-4 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground hover:opacity-90 cursor-pointer focus:outline-none"
+            >
+              Continue
+            </button>
+          )}
         </div>
-      </Card>
+
+      </div>
     </div>
   );
 };
